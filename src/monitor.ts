@@ -13,6 +13,7 @@
  */
 import { BusyBar, type DisplayDrawParams } from '@busy-app/busy-lib';
 import { listenInput } from './input';
+import { pulseLed } from './led';
 import { fetchUsage, NoCredentialsError, RateLimitError, type Usage, type UsageWindow } from './usage';
 
 const APP_NAME = 'claude_usage';
@@ -120,12 +121,7 @@ function serialise<T>(work: () => Promise<T>): Promise<T> {
   return next;
 }
 
-async function render(
-  view: View,
-  stale: boolean,
-  refreshing: boolean,
-  pulseLed = false
-): Promise<void> {
+async function render(view: View, stale: boolean, refreshing: boolean): Promise<void> {
   const pct = Math.max(0, Math.min(100, view.window.utilization));
   const color = stale ? COLORS.stale : severityColor(pct);
   // Width has a floor of 1 (zero is invalid) and is hidden by alpha at 0%,
@@ -138,10 +134,8 @@ async function render(
     displayDraw({
       application_name: APP_NAME,
       priority: PRIORITY,
-      // Fires the firmware's "notification" status-light preset: 3 blinks over
-      // 3s (6 ticks x 500ms). Set only on the draw that opens a fetch — putting
-      // it on every redraw would restart the blink each time.
-      ...(pulseLed ? { led_notification_color: COLORS.refresh } : {}),
+      // No led_notification_color here: the status light is driven separately
+      // by pulseLed(), and a draw that omits the field leaves the light alone.
       elements: [
         {
           id: 'label',
@@ -226,10 +220,10 @@ function currentView(): View | null {
   return views[viewIndex] ?? null;
 }
 
-async function redraw(pulseLed = false): Promise<void> {
+async function redraw(): Promise<void> {
   const view = currentView();
   if (view) {
-    await render(view, stale, refreshing, pulseLed).catch((e) => console.error((e as Error).message));
+    await render(view, stale, refreshing).catch((e) => console.error((e as Error).message));
   }
 }
 
@@ -278,7 +272,9 @@ async function endRefreshIndicator(startedAt: number): Promise<void> {
 async function poll(): Promise<number> {
   const startedAt = Date.now();
   refreshing = true;
-  await redraw(true); // no-op before the first successful fetch, when there is no view yet
+  // Fire-and-forget: the fade outlasts a typical fetch and must not delay it.
+  void pulseLed({ color: COLORS.refresh, signal: controller.signal });
+  await redraw(); // no-op before the first successful fetch, when there is no view yet
 
   try {
     const usage = await fetchUsage();

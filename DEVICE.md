@@ -166,8 +166,38 @@ const StatusLightsPresetBase status_lights_preset_notification = {
 
 So **one request gives a fixed ~3-second, 3-blink pulse**. Duration, rate, and pattern are
 not parameterisable over HTTP; the firmware has other presets (static colour, fade, blink,
-rainbow gradient) but only `notification` is reachable this way. To sustain a longer
-pulse, re-issue a draw roughly every 3s.
+rainbow gradient) but only `notification` is reachable this way.
+
+#### Fading it smoothly
+
+**Alpha does not control LED intensity.** `status_lights_set_output` reads only
+`color.r/g/b`, and the notification preset sets `override_brightness = true`, so the
+device's own LED brightness is bypassed as well. Intensity therefore comes from scaling
+the RGB components themselves (`#00CCFF` at 25% is `#003340`).
+
+Arbitrary fades are still possible because of two firmware details:
+
+1. `status_lights_do_run_preset` frees any running preset and calls `run_pattern`
+   **immediately**, and `blink` starts in its on-phase — a new colour applies at once
+   rather than on the next 500ms tick.
+2. So re-issuing a draw faster than the 500ms period keeps the light continuously lit
+   while the colour changes underneath it.
+
+`src/led.ts` drives this: one small draw per frame at ~30fps (measured ~11ms round trip,
+all frames accepted). Two things matter for it to look right:
+
+- Apply a perceptual gamma (~2.2) to the ramp. PWM output is linear in the component
+  value, so a linear ramp reads as a hard flash at the top and nothing at the bottom.
+- **End on `#000000FF`**, otherwise the notification preset keeps blinking the last
+  colour for the remainder of its ~3s run. Black blinks black-on-black, i.e. off.
+
+Each frame needs a non-empty `elements` array; a 1×1 fully transparent rectangle works,
+since elements merge by id and leave the screen untouched. A draw that *omits*
+`led_notification_color` does not disturb a running light, so normal redraws are safe.
+
+```sh
+bun run src/led.ts "#00CCFF" 1400 2   # colour, duration ms, fade cycles
+```
 
 Set it only on the draw that *starts* an action — putting it on every redraw restarts the
 blink each time. A malformed value returns `{"error":"Invalid LED notification color"}`,
@@ -269,6 +299,7 @@ override.
 | `bun run src/monitor.ts` | Shows Claude Code usage limits; rotate the encoder to cycle windows. |
 | `bun run src/plasma.ts [seconds]` | Generates, uploads, and plays a looping plasma animation. |
 | `bun run src/input.ts` | Prints button, switch, and encoder events from the device live. |
+| `bun run src/led.ts [#RRGGBB] [ms] [cycles]` | Fades the status light (see Status light below). |
 | `bun run src/screenshot.ts [out] [front\|back] [scale]` | Captures a display to PNG (handles the BGR readback). |
 
 ### Usage monitor
@@ -286,8 +317,8 @@ with a poll's redraw.
 
 **Pressing any button refreshes immediately** rather than waiting out the poll interval.
 While a fetch is in flight, three cyan dots appear between the label and the percentage;
-they stay up for at least 300ms so a sub-second fetch still registers visually. The draw
-that opens a fetch also pulses the status light (see below) — cyan, ~3s.
+they stay up for at least 300ms so a sub-second fetch still registers visually. The status
+light also fades cyan in and out twice over ~1.4s via `src/led.ts`.
 Refreshes fire on `PRESS` only (`RELEASE` would double-trigger) and are gated by
 `REFRESH_COOLDOWN_MS` (default 5s); a 429 extends that gate for the whole `Retry-After`
 window so a button cannot provoke the rate limit again. Because `BACK` dismisses the
