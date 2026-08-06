@@ -136,6 +136,44 @@ same `application_name`. Stock animations live in `/ext/apps_assets/shared/anima
 Working example: `bun run src/plasma.ts [seconds]` generates a looping rainbow
 plasma, uploads it, and plays it on the front display.
 
+### Input: reading events from the device
+
+`POST /api/input?key=<key>` only **sends** a key event to the device. There is no HTTP
+endpoint to read input. Events come back on the **state-stream WebSocket** instead:
+
+```
+ws://<addr>/api/status/ws        then send: {"enable": true}
+```
+
+Messages are protobuf-encoded `BSB_State.State` (schemas:
+[busy-app/busybar-protobuf](https://github.com/busy-app/busybar-protobuf) — `state.proto`,
+`input.proto`). Input arrives as `State.updates[].input` (field 11):
+
+| Event | Values |
+|---|---|
+| `ButtonEvent` | button `OK`/`BACK`/`START`, action `PRESS`/`RELEASE` |
+| `SwitchEvent` | position `BUSY`/`CUSTOM`/`OFF`/`APPS`/`SETTINGS` |
+| `EncoderEvent` | `delta` (sint32, zigzag-encoded) — the rotary dial |
+
+`bun run src/input.ts` prints these live; `src/input.ts` also exports `listenInput()` and
+`decodeInputEvents()`. It decodes only the input field and skips everything else (frames
+dominate the stream), so it needs no protobuf runtime. The library's own `StateStream`
+decodes everything but runs in a browser Shared Worker.
+
+The `up`/`down` keys map to encoder deltas of +1/−1, and `busy`/`custom`/`off`/`apps`/
+`settings` produce switch events.
+
+> **Injected input has real side effects.** `POST /api/input?key=ok` with the switch in
+> BUSY position *starts a BUSY timer*, and `start` does the same. Stop one by PUTting a
+> `NOT_STARTED` snapshot (`snapshot_timestamp_ms` is required, or you get
+> `{"error":"Failed to parse snapshot"}`).
+
+> **Protobuf parsing trap:** in a hand-rolled reader, `offset += readVarint()` is wrong —
+> JavaScript evaluates the left `offset` *before* `readVarint()` advances it, so the skip
+> under-advances by the length-prefix size and desyncs the parser on the next tag
+> (surfacing as "invalid wire type 3/4/6/7"). The same applies to
+> `subarray(offset, offset + readVarint())`. Read the length into a variable first.
+
 ### Reading the screen back
 
 `GET /api/screen?display=0|1` (0 = front, 1 = back → 160×80).
@@ -169,6 +207,7 @@ plasma, uploads it, and plays it on the front display.
 | `bun run index.ts` | Connectivity smoke test — prints device status and busy-timer state. |
 | `bun run src/monitor.ts` | Polls the Claude Code 5-hour usage limit and shows it on the front display. |
 | `bun run src/plasma.ts [seconds]` | Generates, uploads, and plays a looping plasma animation. |
+| `bun run src/input.ts` | Prints button, switch, and encoder events from the device live. |
 | `bun run src/screenshot.ts [out] [front\|back] [scale]` | Captures a display to PNG (handles the BGR readback). |
 
 ### Usage monitor
