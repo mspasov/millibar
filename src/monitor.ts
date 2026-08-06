@@ -2,13 +2,14 @@
  * Shows Claude Code usage limits on the BUSY Bar front display.
  *
  * Rotating the device's encoder cycles through the available limit windows
- * (5-hour, 7-day, and any per-model weekly windows such as Fable).
+ * (5-hour, 7-day, and any per-model weekly windows such as Fable). Pressing any
+ * button refreshes the data immediately instead of waiting for the next poll.
  *
  * Layout (72x16): window label on the left, percentage on the right, and a
  * progress bar along the bottom. Colour tracks severity.
  *
  * Usage: bun run src/monitor.ts
- * Env:   BUSY_BAR_ADDR, BUSY_PRIORITY, POLL_INTERVAL_MS
+ * Env:   BUSY_BAR_ADDR, BUSY_PRIORITY, POLL_INTERVAL_MS, REFRESH_COOLDOWN_MS
  */
 import { BusyBar } from '@busy-app/busy-lib';
 import { listenInput } from './input';
@@ -21,6 +22,9 @@ const BAR_HEIGHT = 3;
 
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 5 * 60 * 1000);
 const PRIORITY = Number(process.env.BUSY_PRIORITY ?? 50);
+/** Floor between API fetches, so holding a button can't hammer the endpoint
+ * into a 429. */
+const REFRESH_COOLDOWN_MS = Number(process.env.REFRESH_COOLDOWN_MS ?? 5000);
 /** Outlive one poll so a slow fetch doesn't blank the display, but self-clear
  * within ~2 polls if this process dies. */
 const DRAW_TIMEOUT_S = Math.ceil((POLL_INTERVAL_MS * 1.5) / 1000);
@@ -166,9 +170,40 @@ async function redraw(): Promise<void> {
   if (view) await render(view, stale).catch((e) => console.error((e as Error).message));
 }
 
+/** Earliest time the API may be hit again — advanced by a successful fetch and,
+ * further, by a 429's Retry-After so a button press cannot bypass the back-off. */
+let nextFetchAllowedAt = 0;
+/** Set only while the poll loop is sleeping; calling it starts the next fetch
+ * early. Null means a fetch is already in flight. */
+let wakePoll: (() => void) | null = null;
+
+function sleepUntilDueOrWoken(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      wakePoll = null;
+      resolve();
+    };
+    const timer = setTimeout(finish, ms);
+    wakePoll = finish;
+  });
+}
+
+function requestRefresh(reason: string): void {
+  const waitMs = nextFetchAllowedAt - Date.now();
+  if (waitMs > 0) {
+    console.log(`  ${reason}: ignored, ${Math.ceil(waitMs / 1000)}s cooldown remaining`);
+    return;
+  }
+  if (!wakePoll) return; // already fetching
+  console.log(`  ${reason}: refreshing`);
+  wakePoll();
+}
+
 async function poll(): Promise<number> {
   try {
     const usage = await fetchUsage();
+    nextFetchAllowedAt = Date.now() + REFRESH_COOLDOWN_MS;
     const previousLabel = currentView()?.label;
     views = buildViews(usage);
     // Keep showing the same window across refreshes even if the list changed.
@@ -189,9 +224,15 @@ async function poll(): Promise<number> {
     console.error(`[${new Date().toLocaleTimeString()}] ${(error as Error).message}`);
     stale = true;
     await redraw();
-    return error instanceof RateLimitError
-      ? Math.max(error.retryAfterSeconds * 1000, POLL_INTERVAL_MS)
-      : POLL_INTERVAL_MS;
+
+    const waitMs =
+      error instanceof RateLimitError
+        ? Math.max(error.retryAfterSeconds * 1000, POLL_INTERVAL_MS)
+        : POLL_INTERVAL_MS;
+    // Hold button-triggered refreshes off for the whole back-off, not just the
+    // usual cooldown, so a 429 isn't immediately provoked again.
+    nextFetchAllowedAt = Date.now() + (error instanceof RateLimitError ? waitMs : REFRESH_COOLDOWN_MS);
+    return waitMs;
   }
 }
 
@@ -201,13 +242,18 @@ async function pollLoop(): Promise<void> {
   while (!controller.signal.aborted) {
     const waitMs = await poll();
     if (controller.signal.aborted) break;
-    await Bun.sleep(waitMs);
+    await sleepUntilDueOrWoken(waitMs);
   }
 }
 
 async function inputLoop(): Promise<void> {
   await listenInput(
     (event) => {
+      if (event.type === 'button') {
+        // RELEASE would fire a second time for the same press.
+        if (event.action === 'PRESS') requestRefresh(`${event.button} pressed`);
+        return;
+      }
       if (event.type !== 'encoder' || event.delta === 0 || views.length < 2) return;
       // Encoder deltas can exceed 1 on a fast spin; wrap in both directions.
       viewIndex = (((viewIndex + event.delta) % views.length) + views.length) % views.length;
@@ -232,8 +278,8 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
 
 console.log(
   `Monitoring Claude Code usage on ${process.env.BUSY_BAR_ADDR ?? '10.0.4.20'} ` +
-    `every ${Math.round(POLL_INTERVAL_MS / 1000)}s — rotate the encoder to cycle windows ` +
-    '(Ctrl-C to stop and clear)'
+    `every ${Math.round(POLL_INTERVAL_MS / 1000)}s — rotate the encoder to cycle windows, ` +
+    'press any button to refresh (Ctrl-C to stop and clear)'
 );
 
 await Promise.all([pollLoop(), inputLoop()]);

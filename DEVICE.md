@@ -163,10 +163,34 @@ decodes everything but runs in a browser Shared Worker.
 The `up`/`down` keys map to encoder deltas of +1/−1, and `busy`/`custom`/`off`/`apps`/
 `settings` produce switch events.
 
-> **Injected input has real side effects.** `POST /api/input?key=ok` with the switch in
-> BUSY position *starts a BUSY timer*, and `start` does the same. Stop one by PUTting a
-> `NOT_STARTED` snapshot (`snapshot_timestamp_ms` is required, or you get
-> `{"error":"Failed to parse snapshot"}`).
+> **Injected input has real side effects.** `POST /api/input?key=ok` and `key=start` can
+> *start a BUSY timer* — observed repeatedly, though not in every device state, so treat
+> any injected button as potentially state-changing rather than assuming a rule. Stop a
+> running timer by PUTting a `NOT_STARTED` snapshot (`snapshot_timestamp_ms` is required,
+> or you get `{"error":"Failed to parse snapshot"}`).
+
+### Display priority and the BACK button
+
+`BACK` dismisses the Canvas app and drops the device to its **stub app**, which renders
+nothing — the display goes black but is not powered off. Verified by probing what the
+device will accept afterwards:
+
+| Foreground | Draw at priority 1 | Draw at priority 50 |
+|---|---|---|
+| Canvas app at priority 50 | rejected | rejected |
+| After `BACK` | **accepted** | — |
+
+A priority-1 draw succeeding after `BACK` puts the foreground app at priority 0, the
+documented stub/poweroff level. Any subsequent draw reclaims the display.
+
+This makes `BACK` look intermittent when it is in fact perfectly consistent: an app that
+only redraws occasionally leaves the screen dark until its next draw, so whether you
+notice depends entirely on how soon something repaints. Pressing `BACK` again on an
+already-blank screen also does nothing visible.
+
+Note also that a same-priority draw from a *different* `application_name` was rejected
+while the Canvas app held the display, despite the spec saying equal-priority requests
+override.
 
 > **Protobuf parsing trap:** in a hand-rolled reader, `offset += readVarint()` is wrong —
 > JavaScript evaluates the left `offset` *before* `readVarint()` advances it, so the skip
@@ -222,6 +246,17 @@ active model-scoped weekly limit (e.g. `FABLE`). The list is rebuilt on each pol
 the API adds and drops model windows, and the current selection follows its label across
 refreshes rather than its index. Draws are serialised so a fast spin cannot interleave
 with a poll's redraw.
+
+**Pressing any button refreshes immediately** rather than waiting out the poll interval.
+Refreshes fire on `PRESS` only (`RELEASE` would double-trigger) and are gated by
+`REFRESH_COOLDOWN_MS` (default 5s); a 429 extends that gate for the whole `Retry-After`
+window so a button cannot provoke the rate limit again. Because `BACK` dismisses the
+Canvas app (see below), binding refresh to buttons also means a `BACK` press redraws
+within ~1s instead of leaving the display blank until the next poll.
+
+> Buttons keep their native device functions as well — depending on device state, `OK`
+> and `START` can start a BUSY session. That is the device's own behaviour, not something
+> the monitor triggers, but it is worth knowing before you reach over and tap `OK`.
 
 Usage data comes from `GET https://api.anthropic.com/api/oauth/usage` with an
 `anthropic-beta: oauth-2025-04-20` header, authorised by the OAuth token Claude Code
