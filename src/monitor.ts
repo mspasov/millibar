@@ -38,7 +38,20 @@ const COLORS = {
   track: '#202020FF',
   label: '#8899AAFF',
   stale: '#555555FF',
+  refresh: '#00CCFFFF',
 } as const;
+
+/** Elements persist by id until cleared or their timeout expires — a redraw
+ * that simply omits one leaves it on screen. Hiding therefore means drawing it
+ * with zero alpha, not dropping it from the list. */
+const HIDDEN = (color: string) => `${color.slice(0, 7)}00`;
+
+/** Activity dots, shown between the label and the percentage while fetching. */
+const DOT_XS = [36, 40, 44];
+const DOT_Y = 4;
+const DOT_SIZE = 2;
+/** Floor on how long the dots stay up, so a fast fetch still registers visually. */
+const MIN_INDICATOR_MS = 300;
 
 interface View {
   label: string;
@@ -83,10 +96,14 @@ function serialise<T>(work: () => Promise<T>): Promise<T> {
   return next;
 }
 
-async function render(view: View, stale: boolean): Promise<void> {
+async function render(view: View, stale: boolean, refreshing: boolean): Promise<void> {
   const pct = Math.max(0, Math.min(100, view.window.utilization));
   const color = stale ? COLORS.stale : severityColor(pct);
-  const fillWidth = Math.round((WIDTH * pct) / 100);
+  // Width has a floor of 1 (zero is invalid) and is hidden by alpha at 0%,
+  // rather than omitted — an omitted element would leave the previous bar up.
+  const fillWidth = Math.max(1, Math.round((WIDTH * pct) / 100));
+  const fillColor = pct > 0 ? color : HIDDEN(color);
+  const dotColor = refreshing ? COLORS.refresh : HIDDEN(COLORS.refresh);
 
   await serialise(() =>
     bar.DisplayDraw({
@@ -132,26 +149,36 @@ async function render(view: View, stale: boolean): Promise<void> {
           timeout: DRAW_TIMEOUT_S,
           display: 'front',
         },
-        // A zero-width rectangle is invalid, so the fill is omitted entirely at 0%.
-        ...(fillWidth > 0
-          ? [
-              {
-                id: 'fill',
-                type: 'rectangle' as const,
-                x: 0,
-                y: BAR_Y,
-                width: fillWidth,
-                height: BAR_HEIGHT,
-                radius: 0,
-                fill: 'solid' as const,
-                fill_colors: [color],
-                border_width: 0,
-                border_color: color,
-                timeout: DRAW_TIMEOUT_S,
-                display: 'front' as const,
-              },
-            ]
-          : []),
+        {
+          id: 'fill',
+          type: 'rectangle',
+          x: 0,
+          y: BAR_Y,
+          width: fillWidth,
+          height: BAR_HEIGHT,
+          radius: 0,
+          fill: 'solid',
+          fill_colors: [fillColor],
+          border_width: 0,
+          border_color: fillColor,
+          timeout: DRAW_TIMEOUT_S,
+          display: 'front',
+        },
+        ...DOT_XS.map((x, i) => ({
+          id: `dot${i}`,
+          type: 'rectangle' as const,
+          x,
+          y: DOT_Y,
+          width: DOT_SIZE,
+          height: DOT_SIZE,
+          radius: 0,
+          fill: 'solid' as const,
+          fill_colors: [dotColor],
+          border_width: 0,
+          border_color: dotColor,
+          timeout: DRAW_TIMEOUT_S,
+          display: 'front' as const,
+        })),
       ],
     })
   );
@@ -160,6 +187,7 @@ async function render(view: View, stale: boolean): Promise<void> {
 let views: View[] = [];
 let viewIndex = 0;
 let stale = false;
+let refreshing = false;
 
 function currentView(): View | null {
   return views[viewIndex] ?? null;
@@ -167,7 +195,7 @@ function currentView(): View | null {
 
 async function redraw(): Promise<void> {
   const view = currentView();
-  if (view) await render(view, stale).catch((e) => console.error((e as Error).message));
+  if (view) await render(view, stale, refreshing).catch((e) => console.error((e as Error).message));
 }
 
 /** Earliest time the API may be hit again — advanced by a successful fetch and,
@@ -200,7 +228,19 @@ function requestRefresh(reason: string): void {
   wakePoll();
 }
 
+/** Clear the activity dots, keeping them up for at least MIN_INDICATOR_MS so a
+ * sub-second fetch doesn't flash by unseen. */
+async function endRefreshIndicator(startedAt: number): Promise<void> {
+  const elapsed = Date.now() - startedAt;
+  if (elapsed < MIN_INDICATOR_MS) await Bun.sleep(MIN_INDICATOR_MS - elapsed);
+  refreshing = false;
+}
+
 async function poll(): Promise<number> {
+  const startedAt = Date.now();
+  refreshing = true;
+  await redraw(); // no-op before the first successful fetch, when there is no view yet
+
   try {
     const usage = await fetchUsage();
     nextFetchAllowedAt = Date.now() + REFRESH_COOLDOWN_MS;
@@ -215,6 +255,7 @@ async function poll(): Promise<number> {
     const reset = currentView()?.window.resetsAt ?? null;
     console.log(`[${new Date().toLocaleTimeString()}] ${summary} (${currentView()?.label}: ${formatReset(reset)})`);
 
+    await endRefreshIndicator(startedAt);
     await redraw();
     return POLL_INTERVAL_MS;
   } catch (error) {
@@ -223,6 +264,7 @@ async function poll(): Promise<number> {
     // Keep the last known values on screen, dimmed, rather than blanking.
     console.error(`[${new Date().toLocaleTimeString()}] ${(error as Error).message}`);
     stale = true;
+    await endRefreshIndicator(startedAt);
     await redraw();
 
     const waitMs =

@@ -85,6 +85,13 @@ Element types: `text`, `image`, `animation`, `countdown`, `rectangle`. Each elem
 running app's. Built-in apps run at 10; an active BUSY/CUSTOM work session runs at 90 —
 so a default-priority draw won't interrupt a focus session.
 
+> **Elements persist by id.** A redraw that simply *omits* a previously drawn element
+> leaves it on screen — the element list is merged by id, not replaced. Verified: drawing
+> `[a, b]` then redrawing `[a]` leaves both visible. To hide something, redraw it with
+> zero alpha (`#RRGGBB00` renders nothing) or clear the whole app with
+> `DELETE /api/display/draw?application_name=…`. This bites when an element is drawn
+> conditionally: a progress bar omitted at 0% keeps showing its previous width.
+
 ```sh
 # Draw scrolling green text on the front display for 20s
 curl -X POST http://10.0.4.20/api/display/draw \
@@ -248,6 +255,8 @@ refreshes rather than its index. Draws are serialised so a fast spin cannot inte
 with a poll's redraw.
 
 **Pressing any button refreshes immediately** rather than waiting out the poll interval.
+While a fetch is in flight, three cyan dots appear between the label and the percentage;
+they stay up for at least 300ms so a sub-second fetch still registers visually.
 Refreshes fire on `PRESS` only (`RELEASE` would double-trigger) and are gated by
 `REFRESH_COOLDOWN_MS` (default 5s); a 429 extends that gate for the whole `Retry-After`
 window so a button cannot provoke the rate limit again. Because `BACK` dismisses the
