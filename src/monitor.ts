@@ -96,7 +96,12 @@ function serialise<T>(work: () => Promise<T>): Promise<T> {
   return next;
 }
 
-async function render(view: View, stale: boolean, refreshing: boolean): Promise<void> {
+async function render(
+  view: View,
+  stale: boolean,
+  refreshing: boolean,
+  pulseLed = false
+): Promise<void> {
   const pct = Math.max(0, Math.min(100, view.window.utilization));
   const color = stale ? COLORS.stale : severityColor(pct);
   // Width has a floor of 1 (zero is invalid) and is hidden by alpha at 0%,
@@ -109,6 +114,10 @@ async function render(view: View, stale: boolean, refreshing: boolean): Promise<
     bar.DisplayDraw({
       application_name: APP_NAME,
       priority: PRIORITY,
+      // Fires the firmware's "notification" status-light preset: 3 blinks over
+      // 3s (6 ticks x 500ms). Set only on the draw that opens a fetch — putting
+      // it on every redraw would restart the blink each time.
+      ...(pulseLed ? { led_notification_color: COLORS.refresh } : {}),
       elements: [
         {
           id: 'label',
@@ -193,9 +202,11 @@ function currentView(): View | null {
   return views[viewIndex] ?? null;
 }
 
-async function redraw(): Promise<void> {
+async function redraw(pulseLed = false): Promise<void> {
   const view = currentView();
-  if (view) await render(view, stale, refreshing).catch((e) => console.error((e as Error).message));
+  if (view) {
+    await render(view, stale, refreshing, pulseLed).catch((e) => console.error((e as Error).message));
+  }
 }
 
 /** Earliest time the API may be hit again — advanced by a successful fetch and,
@@ -239,7 +250,7 @@ async function endRefreshIndicator(startedAt: number): Promise<void> {
 async function poll(): Promise<number> {
   const startedAt = Date.now();
   refreshing = true;
-  await redraw(); // no-op before the first successful fetch, when there is no view yet
+  await redraw(true); // no-op before the first successful fetch, when there is no view yet
 
   try {
     const usage = await fetchUsage();

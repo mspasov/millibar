@@ -143,6 +143,36 @@ same `application_name`. Stock animations live in `/ext/apps_assets/shared/anima
 Working example: `bun run src/plasma.ts [seconds]` generates a looping rainbow
 plasma, uploads it, and plays it on the front display.
 
+### Status light (the LED on top)
+
+The only exposed control is the `led_notification_color` field on a **draw** request —
+there is no dedicated LED endpoint, no LED state in the protobuf stream, and no way to
+read the light back:
+
+```json
+{ "application_name": "my_app", "led_notification_color": "#00CCFFFF", "elements": [ … ] }
+```
+
+It fires the firmware's `StatusLightsPresetNotification`, which is fully specified in
+`applications/services/status_lights/presets/blink.c`:
+
+```c
+const StatusLightsPresetBase status_lights_preset_notification = {
+    .run = blink_run, .period_ms = 500,
+    .repeat_count = 6,            // 6 ticks x 500ms -> 3 blinks over ~3s
+    .override_brightness = true,  // ignores the display brightness setting
+};
+```
+
+So **one request gives a fixed ~3-second, 3-blink pulse**. Duration, rate, and pattern are
+not parameterisable over HTTP; the firmware has other presets (static colour, fade, blink,
+rainbow gradient) but only `notification` is reachable this way. To sustain a longer
+pulse, re-issue a draw roughly every 3s.
+
+Set it only on the draw that *starts* an action — putting it on every redraw restarts the
+blink each time. A malformed value returns `{"error":"Invalid LED notification color"}`,
+which is a handy way to confirm the field is being parsed.
+
 ### Input: reading events from the device
 
 `POST /api/input?key=<key>` only **sends** a key event to the device. There is no HTTP
@@ -256,7 +286,8 @@ with a poll's redraw.
 
 **Pressing any button refreshes immediately** rather than waiting out the poll interval.
 While a fetch is in flight, three cyan dots appear between the label and the percentage;
-they stay up for at least 300ms so a sub-second fetch still registers visually.
+they stay up for at least 300ms so a sub-second fetch still registers visually. The draw
+that opens a fetch also pulses the status light (see below) — cyan, ~3s.
 Refreshes fire on `PRESS` only (`RELEASE` would double-trigger) and are gated by
 `REFRESH_COOLDOWN_MS` (default 5s); a 429 extends that gate for the whole `Retry-After`
 window so a button cannot provoke the rate limit again. Because `BACK` dismisses the
