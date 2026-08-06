@@ -11,7 +11,7 @@
  * Usage: bun run src/monitor.ts
  * Env:   BUSY_BAR_ADDR, BUSY_PRIORITY, POLL_INTERVAL_MS, REFRESH_COOLDOWN_MS
  */
-import { BusyBar } from '@busy-app/busy-lib';
+import { BusyBar, type DisplayDrawParams } from '@busy-app/busy-lib';
 import { listenInput } from './input';
 import { fetchUsage, NoCredentialsError, RateLimitError, type Usage, type UsageWindow } from './usage';
 
@@ -29,7 +29,31 @@ const REFRESH_COOLDOWN_MS = Number(process.env.REFRESH_COOLDOWN_MS ?? 5000);
  * within ~2 polls if this process dies. */
 const DRAW_TIMEOUT_S = Math.ceil((POLL_INTERVAL_MS * 1.5) / 1000);
 
-const bar = new BusyBar({ addr: process.env.BUSY_BAR_ADDR ?? '10.0.4.20' });
+const ADDR = process.env.BUSY_BAR_ADDR ?? '10.0.4.20';
+const BASE_URL = ADDR.startsWith('http') ? ADDR : `http://${ADDR}`;
+
+const bar = new BusyBar({ addr: ADDR });
+
+/**
+ * Posts a draw directly instead of via `bar.DisplayDraw`.
+ *
+ * The library's `draw()` rebuilds the body from only `application_name`,
+ * `priority`, and `elements`, so `led_notification_color` is dropped before the
+ * request even though it is part of the library's own `DisplayDrawParams` type
+ * — the status light would never fire. Everything else about the call is
+ * identical, so this just sends the body as written.
+ */
+async function displayDraw(body: DisplayDrawParams): Promise<void> {
+  const response = await fetch(`${BASE_URL}/api/display/draw`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!response.ok) {
+    throw new Error(`draw failed: HTTP ${response.status} ${await response.text().catch(() => '')}`);
+  }
+}
 
 const COLORS = {
   ok: '#33DD66FF',
@@ -111,7 +135,7 @@ async function render(
   const dotColor = refreshing ? COLORS.refresh : HIDDEN(COLORS.refresh);
 
   await serialise(() =>
-    bar.DisplayDraw({
+    displayDraw({
       application_name: APP_NAME,
       priority: PRIORITY,
       // Fires the firmware's "notification" status-light preset: 3 blinks over

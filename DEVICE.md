@@ -326,3 +326,16 @@ Env: `BUSY_BAR_ADDR`, `BUSY_PRIORITY` (default 50), `POLL_INTERVAL_MS` (default 
 - A draw is rejected with `{"error":"Not drawn due to low priority"}` when another
   Canvas app already holds the display at an equal-or-higher priority — clear that app
   (`DELETE /api/display/draw?application_name=...`) or draw at a higher priority.
+- **`DisplayDraw` silently drops `led_notification_color`.** The library's `draw()`
+  rebuilds the body from only `application_name`, `priority`, and `elements`:
+
+  ```js
+  const { application_name, elements, priority = 50 } = params;
+  body: { application_name, priority, elements }
+  ```
+
+  The field *is* part of its own `DisplayDrawParams` type, so this type-checks and
+  compiles cleanly while the status light never fires. `src/monitor.ts` posts draws
+  with `fetch` instead (keeping the library's types) — see `displayDraw()` there.
+  Worth checking whether other namespaces narrow their bodies the same way; verify with
+  a local echo server rather than trusting the types.
