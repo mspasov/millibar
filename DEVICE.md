@@ -205,17 +205,23 @@ The `up`/`down` keys map to encoder deltas of +1/−1, and `busy`/`custom`/`off`
 | Script | What it does |
 |---|---|
 | `bun run index.ts` | Connectivity smoke test — prints device status and busy-timer state. |
-| `bun run src/monitor.ts` | Polls the Claude Code 5-hour usage limit and shows it on the front display. |
+| `bun run src/monitor.ts` | Shows Claude Code usage limits; rotate the encoder to cycle windows. |
 | `bun run src/plasma.ts [seconds]` | Generates, uploads, and plays a looping plasma animation. |
 | `bun run src/input.ts` | Prints button, switch, and encoder events from the device live. |
 | `bun run src/screenshot.ts [out] [front\|back] [scale]` | Captures a display to PNG (handles the BGR readback). |
 
 ### Usage monitor
 
-`src/monitor.ts` reads Claude Code's OAuth usage limits and renders the 5-hour window as
-a labelled percentage plus a progress bar, recolouring by severity (green < 50% <
+`src/monitor.ts` reads Claude Code's OAuth usage limits and renders one window at a time
+as a labelled percentage plus a progress bar, recolouring by severity (green < 50% <
 amber < 80% < red). It redraws every poll with a timeout of 1.5× the interval, so the
 display self-clears if the process dies, and Ctrl-C clears it explicitly.
+
+**Rotating the device's encoder cycles through the windows** — `5H`, `7D`, and one per
+active model-scoped weekly limit (e.g. `FABLE`). The list is rebuilt on each poll since
+the API adds and drops model windows, and the current selection follows its label across
+refreshes rather than its index. Draws are serialised so a fast spin cannot interleave
+with a poll's redraw.
 
 Usage data comes from `GET https://api.anthropic.com/api/oauth/usage` with an
 `anthropic-beta: oauth-2025-04-20` header, authorised by the OAuth token Claude Code

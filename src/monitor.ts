@@ -1,14 +1,18 @@
 /**
- * Shows the Claude Code 5-hour usage limit on the BUSY Bar front display.
+ * Shows Claude Code usage limits on the BUSY Bar front display.
  *
- * Layout (72x16): "5H" label on the left, percentage on the right, and a
+ * Rotating the device's encoder cycles through the available limit windows
+ * (5-hour, 7-day, and any per-model weekly windows such as Fable).
+ *
+ * Layout (72x16): window label on the left, percentage on the right, and a
  * progress bar along the bottom. Colour tracks severity.
  *
  * Usage: bun run src/monitor.ts
  * Env:   BUSY_BAR_ADDR, BUSY_PRIORITY, POLL_INTERVAL_MS
  */
 import { BusyBar } from '@busy-app/busy-lib';
-import { fetchUsage, NoCredentialsError, RateLimitError, type Usage } from './usage';
+import { listenInput } from './input';
+import { fetchUsage, NoCredentialsError, RateLimitError, type Usage, type UsageWindow } from './usage';
 
 const APP_NAME = 'claude_usage';
 const WIDTH = 72;
@@ -32,6 +36,11 @@ const COLORS = {
   stale: '#555555FF',
 } as const;
 
+interface View {
+  label: string;
+  window: UsageWindow;
+}
+
 function severityColor(pct: number): string {
   if (pct >= 80) return COLORS.critical;
   if (pct >= 50) return COLORS.warn;
@@ -44,131 +53,187 @@ function formatReset(resetsAt: string | null): string {
   if (!Number.isFinite(ms) || ms <= 0) return 'resetting now';
   const hours = Math.floor(ms / 3_600_000);
   const minutes = Math.round((ms % 3_600_000) / 60_000);
-  return `resets in ${hours}h ${minutes}m`;
+  return hours >= 24
+    ? `resets in ${Math.floor(hours / 24)}d ${hours % 24}h`
+    : `resets in ${hours}h ${minutes}m`;
 }
 
-async function render(pct: number, stale: boolean): Promise<void> {
-  const clamped = Math.max(0, Math.min(100, pct));
-  const color = stale ? COLORS.stale : severityColor(clamped);
-  const fillWidth = Math.round((WIDTH * clamped) / 100);
-
-  await bar.DisplayDraw({
-    application_name: APP_NAME,
-    priority: PRIORITY,
-    elements: [
-      {
-        id: 'label',
-        type: 'text',
-        text: stale ? '5H?' : '5H',
-        font: 'small',
-        color: stale ? COLORS.stale : COLORS.label,
-        align: 'mid_left',
-        x: 2,
-        y: 5,
-        timeout: DRAW_TIMEOUT_S,
-        display: 'front',
-      },
-      {
-        id: 'pct',
-        type: 'text',
-        text: `${Math.round(clamped)}%`,
-        font: 'normal',
-        color,
-        align: 'mid_right',
-        x: WIDTH - 2,
-        y: 5,
-        timeout: DRAW_TIMEOUT_S,
-        display: 'front',
-      },
-      {
-        id: 'track',
-        type: 'rectangle',
-        x: 0,
-        y: BAR_Y,
-        width: WIDTH,
-        height: BAR_HEIGHT,
-        radius: 0,
-        fill: 'solid',
-        fill_colors: [COLORS.track],
-        border_width: 0,
-        border_color: COLORS.track,
-        timeout: DRAW_TIMEOUT_S,
-        display: 'front',
-      },
-      // A zero-width rectangle is invalid, so the fill is omitted entirely at 0%.
-      ...(fillWidth > 0
-        ? [
-            {
-              id: 'fill',
-              type: 'rectangle' as const,
-              x: 0,
-              y: BAR_Y,
-              width: fillWidth,
-              height: BAR_HEIGHT,
-              radius: 0,
-              fill: 'solid' as const,
-              fill_colors: [color],
-              border_width: 0,
-              border_color: color,
-              timeout: DRAW_TIMEOUT_S,
-              display: 'front' as const,
-            },
-          ]
-        : []),
-    ],
-  });
+/** The windows available to cycle through, in a stable order. Per-model windows
+ * come and go as the API adds or drops them, so this is rebuilt on every poll. */
+function buildViews(usage: Usage): View[] {
+  const views: View[] = [];
+  if (usage.fiveHour) views.push({ label: '5H', window: usage.fiveHour });
+  if (usage.sevenDay) views.push({ label: '7D', window: usage.sevenDay });
+  for (const model of usage.models) {
+    // Fonts are bitmap ASCII; uppercase keeps the label visually consistent.
+    views.push({ label: model.model.toUpperCase(), window: model });
+  }
+  return views;
 }
 
-function describe(usage: Usage): string {
-  const parts = [`5h ${usage.fiveHour?.utilization ?? 0}% (${formatReset(usage.fiveHour?.resetsAt ?? null)})`];
-  if (usage.sevenDay) parts.push(`7d ${usage.sevenDay.utilization}%`);
-  for (const model of usage.models) parts.push(`${model.model} ${model.utilization}%`);
-  return parts.join(' | ');
+/** Draws are serialised so an encoder spin can't interleave with a poll redraw. */
+let drawChain: Promise<unknown> = Promise.resolve();
+function serialise<T>(work: () => Promise<T>): Promise<T> {
+  const next = drawChain.then(work, work);
+  drawChain = next.catch(() => {});
+  return next;
 }
 
-let lastKnownPct: number | null = null;
-let running = true;
+async function render(view: View, stale: boolean): Promise<void> {
+  const pct = Math.max(0, Math.min(100, view.window.utilization));
+  const color = stale ? COLORS.stale : severityColor(pct);
+  const fillWidth = Math.round((WIDTH * pct) / 100);
+
+  await serialise(() =>
+    bar.DisplayDraw({
+      application_name: APP_NAME,
+      priority: PRIORITY,
+      elements: [
+        {
+          id: 'label',
+          type: 'text',
+          text: stale ? `${view.label}?` : view.label,
+          font: 'small',
+          color: stale ? COLORS.stale : COLORS.label,
+          align: 'mid_left',
+          x: 2,
+          y: 5,
+          timeout: DRAW_TIMEOUT_S,
+          display: 'front',
+        },
+        {
+          id: 'pct',
+          type: 'text',
+          text: `${Math.round(pct)}%`,
+          font: 'normal',
+          color,
+          align: 'mid_right',
+          x: WIDTH - 2,
+          y: 5,
+          timeout: DRAW_TIMEOUT_S,
+          display: 'front',
+        },
+        {
+          id: 'track',
+          type: 'rectangle',
+          x: 0,
+          y: BAR_Y,
+          width: WIDTH,
+          height: BAR_HEIGHT,
+          radius: 0,
+          fill: 'solid',
+          fill_colors: [COLORS.track],
+          border_width: 0,
+          border_color: COLORS.track,
+          timeout: DRAW_TIMEOUT_S,
+          display: 'front',
+        },
+        // A zero-width rectangle is invalid, so the fill is omitted entirely at 0%.
+        ...(fillWidth > 0
+          ? [
+              {
+                id: 'fill',
+                type: 'rectangle' as const,
+                x: 0,
+                y: BAR_Y,
+                width: fillWidth,
+                height: BAR_HEIGHT,
+                radius: 0,
+                fill: 'solid' as const,
+                fill_colors: [color],
+                border_width: 0,
+                border_color: color,
+                timeout: DRAW_TIMEOUT_S,
+                display: 'front' as const,
+              },
+            ]
+          : []),
+      ],
+    })
+  );
+}
+
+let views: View[] = [];
+let viewIndex = 0;
+let stale = false;
+
+function currentView(): View | null {
+  return views[viewIndex] ?? null;
+}
+
+async function redraw(): Promise<void> {
+  const view = currentView();
+  if (view) await render(view, stale).catch((e) => console.error((e as Error).message));
+}
 
 async function poll(): Promise<number> {
   try {
     const usage = await fetchUsage();
-    const pct = usage.fiveHour?.utilization ?? 0;
-    lastKnownPct = pct;
-    console.log(`[${new Date().toLocaleTimeString()}] ${describe(usage)}`);
-    await render(pct, false);
+    const previousLabel = currentView()?.label;
+    views = buildViews(usage);
+    // Keep showing the same window across refreshes even if the list changed.
+    const sameView = views.findIndex((v) => v.label === previousLabel);
+    viewIndex = sameView >= 0 ? sameView : Math.min(viewIndex, Math.max(views.length - 1, 0));
+    stale = false;
+
+    const summary = views.map((v) => `${v.label} ${v.window.utilization}%`).join(' | ');
+    const reset = currentView()?.window.resetsAt ?? null;
+    console.log(`[${new Date().toLocaleTimeString()}] ${summary} (${currentView()?.label}: ${formatReset(reset)})`);
+
+    await redraw();
     return POLL_INTERVAL_MS;
   } catch (error) {
     if (error instanceof NoCredentialsError) throw error;
 
-    // Keep the last known value on screen, dimmed, rather than blanking it.
+    // Keep the last known values on screen, dimmed, rather than blanking.
     console.error(`[${new Date().toLocaleTimeString()}] ${(error as Error).message}`);
-    if (lastKnownPct !== null) {
-      await render(lastKnownPct, true).catch(() => {});
-    }
+    stale = true;
+    await redraw();
     return error instanceof RateLimitError
       ? Math.max(error.retryAfterSeconds * 1000, POLL_INTERVAL_MS)
       : POLL_INTERVAL_MS;
   }
 }
 
-async function clearDisplay(): Promise<void> {
-  await bar.DisplayClear({ application_name: APP_NAME }).catch(() => {});
+const controller = new AbortController();
+
+async function pollLoop(): Promise<void> {
+  while (!controller.signal.aborted) {
+    const waitMs = await poll();
+    if (controller.signal.aborted) break;
+    await Bun.sleep(waitMs);
+  }
+}
+
+async function inputLoop(): Promise<void> {
+  await listenInput(
+    (event) => {
+      if (event.type !== 'encoder' || event.delta === 0 || views.length < 2) return;
+      // Encoder deltas can exceed 1 on a fast spin; wrap in both directions.
+      viewIndex = (((viewIndex + event.delta) % views.length) + views.length) % views.length;
+      const view = currentView();
+      if (view) {
+        console.log(`  -> ${view.label} ${view.window.utilization}% (${formatReset(view.window.resetsAt)})`);
+      }
+      void redraw();
+    },
+    { signal: controller.signal, onError: (e) => console.error(e.message) }
+  );
 }
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {
-    running = false;
-    void clearDisplay().then(() => process.exit(0));
+    controller.abort();
+    void serialise(() => bar.DisplayClear({ application_name: APP_NAME }))
+      .catch(() => {})
+      .finally(() => process.exit(0));
   });
 }
 
 console.log(
-  `Monitoring Claude Code 5h limit on ${process.env.BUSY_BAR_ADDR ?? '10.0.4.20'} ` +
-    `every ${Math.round(POLL_INTERVAL_MS / 1000)}s (Ctrl-C to stop and clear)`
+  `Monitoring Claude Code usage on ${process.env.BUSY_BAR_ADDR ?? '10.0.4.20'} ` +
+    `every ${Math.round(POLL_INTERVAL_MS / 1000)}s — rotate the encoder to cycle windows ` +
+    '(Ctrl-C to stop and clear)'
 );
 
-while (running) {
-  const waitMs = await poll();
-  if (!running) break;
-  await Bun.sleep(waitMs);
-}
+await Promise.all([pollLoop(), inputLoop()]);
