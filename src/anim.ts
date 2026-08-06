@@ -23,10 +23,22 @@ const MAX_BLOCKS_PER_BYTE = 127;
 const RLE_BLOCK_THRESHOLD = 3;
 const MAX_FRAME_DURATION = 255;
 
+export interface AnimSection {
+  /** Name referenced by a draw element's `section` field. */
+  name: string;
+  /** First display-frame index, inclusive. */
+  start: number;
+  /** Last display-frame index, inclusive. */
+  end: number;
+}
+
 export interface AnimOptions {
   width: number;
   height: number;
   fps: number;
+  /** Extra named sections. The mandatory "default" section covering every
+   * frame is always written first; these follow it. */
+  sections?: AnimSection[];
 }
 
 interface FileFrame {
@@ -148,10 +160,36 @@ export function encodeAnim(frames: Uint8Array[], opts: AnimOptions): Uint8Array 
     maxEncodedLen = Math.max(maxEncodedLen, frame.encoded.length);
   }
 
-  // Single mandatory "default" section spanning all display frames
-  const sectionName = 'default';
-  const sectionsChunkLen = 13 + sectionName.length + 1;
-  const firstFrame = fileFrames[0]!;
+  // Mandatory "default" section first, then any caller-supplied ones
+  const sections: AnimSection[] = [
+    { name: 'default', start: 0, end: frames.length - 1 },
+    ...(opts.sections ?? []),
+  ];
+  const names = new Set<string>();
+  for (const s of sections.slice(1)) {
+    if (!/^[A-Za-z0-9_.-]+$/.test(s.name) || s.name === 'default') {
+      throw new Error(`invalid section name ${JSON.stringify(s.name)}`);
+    }
+    if (names.has(s.name)) throw new Error(`duplicate section name "${s.name}"`);
+    names.add(s.name);
+    if (s.start < 0 || s.start > s.end || s.end >= frames.length) {
+      throw new Error(`section "${s.name}": range ${s.start}..${s.end} outside 0..${frames.length - 1}`);
+    }
+  }
+  const sectionsChunkLen = sections.reduce((n, s) => n + 13 + s.name.length + 1, 0);
+
+  // Sections address display frames, but identical frames were folded into
+  // durations above — so a section may start mid-way through a file frame.
+  // Per display frame: the file offset of its file frame, and how many display
+  // frames that file frame still covers from there (the duration_override).
+  const displayFrameStart: [number, number][] = [];
+  let frameOffs = HEADER_LENGTH + sectionsChunkLen;
+  for (const frame of fileFrames) {
+    for (let remaining = frame.duration; remaining > 0; remaining--) {
+      displayFrameStart.push([frameOffs, remaining]);
+    }
+    frameOffs += 4 + frame.encoded.length;
+  }
 
   const out = new Uint8Array(HEADER_LENGTH + sectionsChunkLen + framesChunkLen);
   const view = new DataView(out.buffer);
@@ -168,17 +206,20 @@ export function encodeAnim(frames: Uint8Array[], opts: AnimOptions): Uint8Array 
   out[o++] = 0; // unused
   view.setUint32(o, sectionsChunkLen, true); o += 4;
   view.setUint32(o, framesChunkLen, true); o += 4;
-  view.setUint32(o, 1, true); o += 4; // section_count
+  view.setUint32(o, sections.length, true); o += 4;
   view.setUint32(o, fileFrames.length, true); o += 4;
   view.setUint32(o, frames.length, true); o += 4;
 
-  // "default" section
-  view.setUint32(o, 0, true); o += 4; // start
-  view.setUint32(o, frames.length - 1, true); o += 4; // end
-  view.setUint32(o, HEADER_LENGTH + sectionsChunkLen, true); o += 4; // frame_offs
-  out[o++] = firstFrame.duration; // duration_override
-  for (const ch of sectionName) out[o++] = ch.charCodeAt(0);
-  out[o++] = 0;
+  // Sections
+  for (const section of sections) {
+    const [offs, override] = displayFrameStart[section.start]!;
+    view.setUint32(o, section.start, true); o += 4;
+    view.setUint32(o, section.end, true); o += 4;
+    view.setUint32(o, offs, true); o += 4;
+    out[o++] = override;
+    for (const ch of section.name) out[o++] = ch.charCodeAt(0);
+    out[o++] = 0;
+  }
 
   // Frames
   for (const frame of fileFrames) {

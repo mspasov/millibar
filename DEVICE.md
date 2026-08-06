@@ -140,8 +140,57 @@ Playback: upload with `POST /api/assets/upload?application_name=<app>&file=<name
 same `application_name`. Stock animations live in `/ext/apps_assets/shared/animations/`
 (e.g. `coding_72x16.anim`) and play via `stock_path: "shared/coding_72x16.anim"`.
 
+**Sections are switchable live.** The animation element takes a `section` name;
+`loop: true` loops just that section, and redrawing the same element id with a
+different `section` switches with no black frame and no re-upload. One
+multi-section file is therefore the right shape for state-driven animations:
+pre-render N states as sections, and a state change is a single small draw.
+Sections may start mid-way through a folded file frame — `duration_override`
+carries the remaining repeat count (see `seq2anim.py` in the firmware repo).
+`src/anim.ts` encodes extra named sections; verified live by `src/flame.ts`
+(17 sections, ~1.3 MiB, uploads in a few seconds).
+
+Switching behaviour, all verified against `/api/screen` (a wipe test animation
+makes playback position readable; flame frames were then matched byte-exact):
+
+- **Every redraw of an animation element restarts its range at the first frame** —
+  including a redraw that only changes `opacity`. A many-step opacity fade
+  therefore holds the animation near frame 0 for its duration.
+- `await_previous_end: false` — switches immediately: new section from frame 0
+  while the old one was mid-loop. Visibly jumps.
+- `await_previous_end: true` on a looping element — the end of the current loop
+  *iteration* counts as the previous range's end, so the running section finishes
+  its pass and the new one starts exactly at the wrap (observed …f38, f39 →
+  newf0, newf2…). With seams crossfaded and sections content-correlated, the
+  switch is indistinguishable from the loop itself.
+- Awaited requests **queue serially**: each pending range plays a full loop before
+  the next starts, so a burst of N draws stacks ~N loops of latency — pace them
+  client-side if you use them.
+- Race caveat: an awaited switch that lands within ~a frame of the wrap can cut
+  immediately mid-loop instead (seen once across many switches).
+- For **instant** seamless switches, encode phase into the sections instead of
+  waiting for the wrap: store each state's loop twice back-to-back (a full loop
+  entered at any frame is then a contiguous range), emit one section per
+  (state, phase), read the current phase by frame-matching one `/api/screen`
+  capture, and draw the target state's section at that phase plus ~3 frames of
+  capture+draw latency. The switch lands mid-loop in step with what was playing.
+  `src/flame.ts` glides between its 16 levels this way, one level per ~150 ms;
+  641 sections in a 2.7 MiB file are accepted without complaint, and measured
+  step transitions are the size of ~2 ordinary frames of motion.
+
+Two animation elements play simultaneously and composite by `opacity`
+(later-drawn on top; output ≈ top·op + bottom·(1−op), e.g. 255 red under a
+50-opacity element reads back ≈130) — usable for crossfades, within the
+restart-on-redraw caveat above.
+
+`/api/screen` readback matches uploaded frame content byte-exactly (after the BGR
+swap), so matching captures against locally rendered frames identifies the exact
+display frame playing — the debugging primitive behind all of the above.
+
 Working example: `bun run src/plasma.ts [seconds]` generates a looping rainbow
-plasma, uploads it, and plays it on the front display.
+plasma, uploads it, and plays it on the front display. `bun run src/flame.ts` plays
+a fire animation whose intensity the rotary encoder steps through 16 pre-rendered
+section levels.
 
 ### Status light (the LED on top)
 
