@@ -196,8 +196,32 @@ since elements merge by id and leave the screen untouched. A draw that *omits*
 `led_notification_color` does not disturb a running light, so normal redraws are safe.
 
 ```sh
-bun run src/led.ts "#00CCFF" 1400 2   # colour, duration ms, fade cycles
+bun run src/led.ts pulse "#00CCFF" 1400 2                 # colour, duration ms, cycles
+bun run src/led.ts fade "#FF0000,#00FF00,#0000FF" 3000 hsv  # stops, duration ms, space
 ```
+
+#### Colour crossfades
+
+`fadeLed()` walks a list of stops, with `loop`, `pingPong`, and a trailing `fadeOutMs`.
+Interpolation space matters more than it sounds:
+
+| Space | `#FF0000 → #00FF00` midpoint | |
+|---|---|---|
+| `rgb` | `#808000` | muddy olive — channels cross through grey |
+| `hsv` | `#FFFF00` | vivid yellow — travels the hue wheel |
+
+`hsv` is the default. Two edge cases it has to handle, both easy to get subtly wrong:
+
+- **Hue wrap.** Take the shortest way round the wheel, so `#FF0000 → #FF00FF` (0° → 300°)
+  passes through pink at 330° rather than sweeping backwards through every other hue.
+- **Degenerate endpoints.** Black and greys have no meaningful hue (and black no
+  saturation), so they borrow the other end's. Resolve that borrowing *before* measuring
+  hue distance — doing it after leaves the distance based on a hue no longer in play, and
+  `#000000 → #00CCFF` sweeps backwards through red, giving a brown midpoint (`#804D40`)
+  instead of half-brightness cyan (`#006680`).
+
+Frame rate must stay above ~3fps: a gap longer than the preset's 500ms period lets the
+blink show through as a flash.
 
 Set it only on the draw that *starts* an action — putting it on every redraw restarts the
 blink each time. A malformed value returns `{"error":"Invalid LED notification color"}`,
@@ -299,7 +323,7 @@ override.
 | `bun run src/monitor.ts` | Shows Claude Code usage limits; rotate the encoder to cycle windows. |
 | `bun run src/plasma.ts [seconds]` | Generates, uploads, and plays a looping plasma animation. |
 | `bun run src/input.ts` | Prints button, switch, and encoder events from the device live. |
-| `bun run src/led.ts [#RRGGBB] [ms] [cycles]` | Fades the status light (see Status light below). |
+| `bun run src/led.ts pulse\|fade …` | Pulses or crossfades the status light (see Status light below). |
 | `bun run src/screenshot.ts [out] [front\|back] [scale]` | Captures a display to PNG (handles the BGR readback). |
 
 ### Usage monitor
