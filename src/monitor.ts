@@ -255,7 +255,11 @@ function sleepUntilDueOrWoken(ms: number): Promise<void> {
 function requestRefresh(reason: string): void {
   const waitMs = nextFetchAllowedAt - Date.now();
   if (waitMs > 0) {
-    console.log(`  ${reason}: ignored, ${Math.ceil(waitMs / 1000)}s cooldown remaining`);
+    // Skip the API call, but still repaint: the press may well be someone
+    // reacting to a blank screen (BACK dismissed the canvas, or another app
+    // drew over it), and doing nothing for minutes looks broken.
+    console.log(`  ${reason}: cooldown ${Math.ceil(waitMs / 1000)}s, repainting without fetching`);
+    void redraw();
     return;
   }
   if (!wakePoll) return; // already fetching
