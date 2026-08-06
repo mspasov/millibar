@@ -303,6 +303,48 @@ override.
 > Colours you *send* (`#RRGGBBAA` in draw requests) are ordered as documented — only the
 > readback is BGR. `bun run src/screenshot.ts [out.png] [front|back] [scale]` handles this.
 
+### Audio (`.snd` format)
+
+The device has a speaker, driven by `/api/audio/*`:
+
+- `POST /api/audio/play` body `{application_name, path}` (uploaded file) **or**
+  `{application_name, stock_path: "shared/<name>.snd"}` — exactly one of the two.
+  Returns immediately; playback is asynchronous.
+- `DELETE /api/audio/play` stops playback (blocks until the audio service confirms,
+  410 if nothing is playing).
+- `GET/POST /api/audio/volume` — 0–100 (`?volume=NN`, optional `&silent=1`).
+
+The `.snd` format is **headerless raw PCM: signed 16-bit little-endian, mono,
+44100 Hz**. No magic bytes, no metadata — the spec only says "supported formats
+include .snd files". Confirmed from the firmware's `scripts/audio.py`, which encodes
+with ffmpeg `-acodec pcm_s16le -f s16le -ar 44100 -ac 1` (after normalizing loudness
+to −6 LUFS and applying a speaker EQ curve). So: file bytes ÷ 88200 = seconds, and
+synthesizing a sound is just filling an `Int16Array`. Keep synthesized peaks around
+half of full scale to sit comfortably next to the loudness-normalized stock sounds.
+
+Uploaded audio resolves to `/ext/user_assets/<application_name>/<path>` — the same
+directory `POST /api/assets/upload` writes to, so the upload flow is identical to
+animations. Stock sounds live in `/ext/apps_assets/shared/sounds/` (currently
+`calendar_event_starts.snd`, `calendar_reminder_ends.snd`, `volume_change.snd`);
+`stock_path` takes only the last path segment (`shared/volume_change.snd`).
+
+Playback timing (`applications/services/audio/audio.c` in the firmware):
+
+- A play issued while a sound is running does not error and does not overlap: the
+  current sound **fades out over ~10ms** and the new file is queued behind it. Only
+  one file plays at a time; a burst of play requests ends with just the last one
+  audible.
+- The amplifier powers down when idle and takes a **100ms holdoff** on power-up
+  before the sound starts. Every play from silence therefore lags the request by
+  ~100ms plus the HTTP round trip — sounds triggered by physical input (e.g. a
+  click per encoder detent) trail the action noticeably, and nothing API-side can
+  shorten it. It also caps the effective rate at ~8 sounds/s; throttle client-side
+  rather than queueing.
+
+Working examples: `bun run src/chime.ts [freqs-hz...]` synthesizes a two-note chime,
+uploads it, and plays it; `bun run src/click.ts` plays a synthesized ~25ms tick on
+every rotary-encoder event (`--once` for a single test click).
+
 ## Live test performed (2026-08-06)
 
 1. `GET /api/status` → firmware 1.1.1, battery 66% charging, uptime ~21h. ✅
@@ -318,6 +360,9 @@ override.
    confirmed with both injected keys and physical presses. ✅
 9. Pulsed and crossfaded the status light. Confirmed visually by the device's owner;
    the light is not observable over the API. ✅
+10. (2026-08-07) Played the stock `shared/volume_change.snd` — heard by the device's
+    owner — then synthesized a 0.82s two-note chime as raw s16le PCM (src/chime.ts),
+    uploaded it, and played it back. ✅
 
 ## Where the app-level docs live
 

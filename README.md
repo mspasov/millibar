@@ -28,6 +28,8 @@ hangs or errors, see [Troubleshooting](#troubleshooting).
 | `bun run src/led.ts pulse "#00CCFF" 1400 2` | Pulses the status light — colour, duration ms, cycles. |
 | `bun run src/led.ts fade "#F00,#0F0,#00F" 3000 hsv` | Crossfades through colour stops — stops, duration ms, `rgb`\|`hsv`. |
 | `bun run src/plasma.ts [seconds]` | Generates, uploads, and plays a looping plasma animation. |
+| `bun run src/chime.ts [freqs-hz...]` | Synthesizes a chime, uploads it, and plays it on the speaker. |
+| `bun run src/click.ts [--once]` | Clicks the speaker whenever the rotary dial moves. |
 | `bun run src/screenshot.ts [out.png] [front\|back] [scale]` | Captures a display to PNG. |
 
 ## Configuration
@@ -56,6 +58,8 @@ Each is usable on its own, not just by the monitor.
   despite the firmware only exposing a fixed 3-blink notification preset.
 - **`src/anim.ts`** — `encodeAnim()` writes the device's native `bicycle0` animation
   container (RLE-compressed BGR frames), reverse-engineered from the open-source firmware.
+- **`src/snd.ts`** — `pcm16()` converts float samples to the device's `.snd` audio format
+  (raw s16le mono 44.1 kHz).
 - **`src/screenshot.ts`** — captures a display to PNG, handling the BGR framebuffer.
 - **`src/monitor.ts`** — composes the above into the usage monitor.
 
