@@ -138,10 +138,17 @@ plasma, uploads it, and plays it on the front display.
 
 ### Reading the screen back
 
-`GET /api/screen?display=0|1` (0 = front, 1 = back).
+`GET /api/screen?display=0|1` (0 = front, 1 = back → 160×80).
 
-> **Spec quirk:** the OpenAPI spec says `image/bmp`, but the endpoint actually returns a
-> **base64-encoded raw RGB framebuffer** — 72×16×3 = 3456 bytes for the front display.
+> **Two spec quirks, both easy to miss:**
+> 1. The spec says `image/bmp`, but the endpoint returns a **base64-encoded raw
+>    framebuffer** — 72×16×3 = 3456 bytes for the front display.
+> 2. The byte order is **BGR888, not RGB**. Decoding it as RGB silently swaps red and
+>    blue, which is easy to miss because greens and greys look unaffected. The official
+>    library does the swap in `Global/utils/frameData.ts:bgrToRgba`.
+>
+> Colours you *send* (`#RRGGBBAA` in draw requests) are ordered as documented — only the
+> readback is BGR. `bun run src/screenshot.ts [out.png] [front|back] [scale]` handles this.
 
 ## Live test performed (2026-08-06)
 
@@ -155,6 +162,40 @@ plasma, uploads it, and plays it on the front display.
    `/api/assets/upload`, played it looping on the front display, and confirmed
    via `/api/screen` captures that frames were animating. ✅
 
+## Apps in this repo
+
+| Script | What it does |
+|---|---|
+| `bun run index.ts` | Connectivity smoke test — prints device status and busy-timer state. |
+| `bun run src/monitor.ts` | Polls the Claude Code 5-hour usage limit and shows it on the front display. |
+| `bun run src/plasma.ts [seconds]` | Generates, uploads, and plays a looping plasma animation. |
+| `bun run src/screenshot.ts [out] [front\|back] [scale]` | Captures a display to PNG (handles the BGR readback). |
+
+### Usage monitor
+
+`src/monitor.ts` reads Claude Code's OAuth usage limits and renders the 5-hour window as
+a labelled percentage plus a progress bar, recolouring by severity (green < 50% <
+amber < 80% < red). It redraws every poll with a timeout of 1.5× the interval, so the
+display self-clears if the process dies, and Ctrl-C clears it explicitly.
+
+Usage data comes from `GET https://api.anthropic.com/api/oauth/usage` with an
+`anthropic-beta: oauth-2025-04-20` header, authorised by the OAuth token Claude Code
+stores in the macOS Keychain (`~/.claude/.credentials.json` elsewhere). `src/usage.ts`
+is a port of [ai-token-monitor](https://github.com/)'s `src-tauri/src/oauth_usage.rs`.
+Notable details inherited from it:
+
+- A Keychain service can hold several items, some carrying only `mcpOAuth` and no usable
+  token — try multiple account candidates and accept only an item yielding `claudeAiOauth`.
+- Claude Code v2.1.52+ uses a hashed service name, `Claude Code-credentials-{hash}`.
+- Token refresh is delegated to `claude auth status --json` rather than reimplementing
+  the OAuth exchange.
+- `resets_at` is `null` on windows with no scheduled reset — it must be optional.
+- Per-model weekly limits now arrive as active `weekly_scoped` entries in the `limits`
+  array (with `scope.model.display_name`); the legacy `seven_day_sonnet` / `seven_day_opus`
+  keys return `null`.
+
+Env: `BUSY_BAR_ADDR`, `BUSY_PRIORITY` (default 50), `POLL_INTERVAL_MS` (default 300000).
+
 ## Library gotchas
 
 - Status sub-objects (`device`, `firmware`, `power`, `system`) are typed optional —
@@ -162,3 +203,6 @@ plasma, uploads it, and plays it on the front display.
 - Animation elements require explicit `await_previous_end` and `opacity` in TS
   even though the API defaults them.
 - `AssetsUpload` accepts `data: Buffer | Blob | File | ArrayBuffer` (no `Uint8Array`).
+- A draw is rejected with `{"error":"Not drawn due to low priority"}` when another
+  Canvas app already holds the display at an equal-or-higher priority — clear that app
+  (`DELETE /api/display/draw?application_name=...`) or draw at a higher priority.
