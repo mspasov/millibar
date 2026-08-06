@@ -165,13 +165,15 @@ function toWindow(w: ApiWindow | null | undefined): UsageWindow | null {
 }
 
 /**
- * Per-model weekly limits arrive as active `weekly_scoped` entries in `limits`;
- * the legacy `seven_day_<model>` keys are null now. Unscoped session/weekly-all
- * entries are already covered by fiveHour/sevenDay, so they're skipped.
+ * Per-model weekly limits arrive as `weekly_scoped` entries in `limits`; the
+ * legacy `seven_day_<model>` keys are null now. Do NOT filter on `is_active`:
+ * it marks whichever single limit currently binds (highest utilization), not
+ * which windows exist — a model window that isn't the binding one still counts.
+ * Unscoped session/weekly-all entries are already covered by fiveHour/sevenDay,
+ * so they're skipped (they have no model scope).
  */
 function collectModelWindows(limits: ApiLimit[]): ModelWindow[] {
   const windows = limits
-    .filter((l) => l.is_active)
     .map((l) => ({ model: l.scope?.model?.display_name?.trim(), limit: l }))
     .filter((e): e is { model: string; limit: ApiLimit } => Boolean(e.model))
     .map(({ model, limit }) => ({
@@ -229,10 +231,24 @@ export async function fetchUsage(): Promise<Usage> {
     limits?: ApiLimit[];
   };
 
+  lastRawBody = body;
+
   return {
     fiveHour: toWindow(body.five_hour),
     sevenDay: toWindow(body.seven_day),
     models: collectModelWindows(body.limits ?? []),
     fetchedAt: new Date(),
   };
+}
+
+/** Raw body of the last fetch, for debugging shape drift in the undocumented API. */
+export let lastRawBody: unknown = null;
+
+if (import.meta.main) {
+  const usage = await fetchUsage();
+  if (process.argv.includes('--raw')) {
+    console.log(JSON.stringify(lastRawBody, null, 2));
+  } else {
+    console.log(JSON.stringify(usage, null, 2));
+  }
 }

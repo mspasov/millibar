@@ -79,8 +79,13 @@ Parsing notes, each of which has broken a real implementation:
   "usage unavailable" rather than a parse error.
 - **Per-model limits moved.** They now arrive as `weekly_scoped` entries in the `limits`
   array carrying `scope.model.display_name`; the dedicated `seven_day_<model>` keys return
-  `null`. Read the array, and only entries with `is_active: true` — inactive scoped limits
-  should not render, which is how a model window disappears when it no longer applies.
+  `null`.
+- **`is_active` is not a render filter.** It marks whichever *single* limit currently
+  binds — observed across two days flipping from the Fable entry (at 9%, the highest
+  utilization) to the session entry (tied at 10%, session wins ties) while all three
+  entries stayed present. Filtering model windows on `is_active: true` makes them vanish
+  whenever another limit overtakes them, which is exactly how it broke here. A window
+  that stops applying disappears from the array instead.
 - **`limits` may be absent** on older payloads or some accounts. Default it to empty rather
   than failing.
 - **Ignore unknown keys.** The response carries several null-valued codename placeholders
