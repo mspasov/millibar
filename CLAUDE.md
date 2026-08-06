@@ -1,106 +1,82 @@
+# Working in this repo
 
-Default to using Bun instead of Node.js.
+Controls a BUSY Bar (physical LED device) from Bun/TypeScript. See [README.md](README.md)
+for what the apps do, [DEVICE.md](DEVICE.md) for hardware and HTTP API knowledge, and
+[USAGE-API.md](USAGE-API.md) for the Claude Code usage endpoint.
 
-- Use `bun <file>` instead of `node <file>` or `ts-node <file>`
-- Use `bun test` instead of `jest` or `vitest`
-- Use `bun build <file.html|file.ts|file.css>` instead of `webpack` or `esbuild`
-- Use `bun install` instead of `npm install` or `yarn install` or `pnpm install`
-- Use `bun run <script>` instead of `npm run <script>` or `yarn run <script>` or `pnpm run <script>`
-- Use `bunx <package> <command>` instead of `npx <package> <command>`
-- Bun automatically loads .env, so don't use dotenv.
+**Read DEVICE.md before writing device code.** It documents a dozen behaviours that are
+absent from — or contradicted by — the device's own OpenAPI spec, each of which cost real
+debugging time to find.
 
-## APIs
+## The device is real, shared, and stateful
 
-- `Bun.serve()` supports WebSockets, HTTPS, and routes. Don't use `express`.
-- `bun:sqlite` for SQLite. Don't use `better-sqlite3`.
-- `Bun.redis` for Redis. Don't use `ioredis`.
-- `Bun.sql` for Postgres. Don't use `pg` or `postgres.js`.
-- `WebSocket` is built-in. Don't use `ws`.
-- Prefer `Bun.file` over `node:fs`'s readFile/writeFile
-- Bun.$`ls` instead of execa.
+Changes here have physical effects on hardware someone is using. That makes a few things
+non-negotiable.
 
-## Testing
+- **Injected input has side effects.** `POST /api/input?key=ok` or `key=start` can start a
+  BUSY work session, depending on device state. If you start one, stop it: `PUT
+  /api/busy/snapshot` with `{"snapshot":{"type":"NOT_STARTED", …}, "snapshot_timestamp_ms": …}`
+  (the timestamp is required). Read the snapshot *before* you experiment so you can restore
+  what was actually there.
+- **The display is a shared resource.** Only one app holds it at a time. A test script that
+  draws at a higher priority will steal the screen, and clearing that script leaves the
+  screen blank — the previous app does not come back on its own. Clean up with
+  `DELETE /api/display/draw?application_name=…`.
+- **Don't leave background processes running** across a task without saying so. Long-running
+  scripts hold the display.
+- **The usage API rate-limits.** Iterating on the monitor will hit a 429 and back off for a
+  minute. Budget for it; don't work around it by polling harder.
 
-Use `bun test` to run tests.
+## Verify on the wire, not in the type system
 
-```ts#index.test.ts
-import { test, expect } from "bun:test";
+The one rule worth internalising. The library's types are not evidence that a request
+does what you think:
 
-test("hello world", () => {
-  expect(1).toBe(1);
-});
-```
+`busy-lib`'s `DisplayDraw` accepts `led_notification_color` in its `DisplayDrawParams`
+type, then rebuilds the request body from only `{application_name, priority, elements}` —
+silently dropping the field. It type-checked, compiled, returned 200, and the light never
+came on. Confirming the firmware parses the field and that the types accept it proved
+nothing about the middle.
 
-## Frontend
+So when something doesn't work, or before claiming it does:
 
-Use HTML imports with `Bun.serve()`. Don't use `vite`. HTML imports fully support React, CSS, Tailwind.
+- **HTTP bodies** → point `BUSY_BAR_ADDR` at a local `Bun.serve()` echo server and print
+  what actually arrives. Note the client does a `GET /api/version` handshake first and
+  requires `api_semver` in the reply.
+- **Display output** → `bun run src/screenshot.ts`, and read the PNG. Lit-pixel counts are
+  a quick assertion (`263` → `275` proved the three refresh dots appeared).
+- **Transient display states** → poll `/api/screen` in a tight loop and keep the frame that
+  shows what you're after; a 300ms indicator is otherwise unobservable.
+- **Pure logic** (colour mixing, encoders, parsers) → stub `fetch` and assert on the values.
+  This caught a hue-interpolation bug before it ever reached hardware.
+- **The status light** → not observable. No endpoint, no state stream, not in the
+  framebuffer. **Ask the user.** Don't assert it works.
 
-Server:
+If you cannot observe something, say so plainly rather than implying it was verified.
 
-```ts#index.ts
-import index from "./index.html"
+## Known traps
 
-Bun.serve({
-  routes: {
-    "/": index,
-    "/api/users/:id": {
-      GET: (req) => {
-        return new Response(JSON.stringify({ id: req.params.id }));
-      },
-    },
-  },
-  // optional websocket support
-  websocket: {
-    open: (ws) => {
-      ws.send("Hello, world!");
-    },
-    message: (ws, message) => {
-      ws.send(message);
-    },
-    close: (ws) => {
-      // handle close
-    }
-  },
-  development: {
-    hmr: true,
-    console: true,
-  }
-})
-```
+Full detail in DEVICE.md; these are the ones that bite hardest.
 
-HTML files can import .tsx, .jsx or .js files directly and Bun's bundler will transpile & bundle automatically. `<link>` tags can point to stylesheets and Bun's CSS bundler will bundle.
+- **Screen readback is BGR**, not RGB. Decoding it as RGB swaps red and blue — and greens
+  and greys look fine, so it passes a casual glance. Colours you *send* are `#RRGGBBAA` as
+  documented; only the readback is reversed.
+- **Display elements persist by id.** A redraw that omits an element leaves it on screen.
+  Hide with zero alpha (`#RRGGBB00`); never by omission. Conditionally-drawn elements are a
+  recurring bug source.
+- **`offset += readVarint()` is wrong in JavaScript.** The left operand is evaluated before
+  the call advances the offset, so the skip under-advances and the parser desyncs. Same for
+  `subarray(offset, offset + readVarint())`. Read the length into a variable first. This
+  produced both a crash *and*, in a later "fix", silently zeroed values.
+- **Alpha does not control LED intensity** — only `r/g/b` are read. Scale the components.
 
-```html#index.html
-<html>
-  <body>
-    <h1>Hello, world!</h1>
-    <script type="module" src="./frontend.tsx"></script>
-  </body>
-</html>
-```
+## Conventions
 
-With the following `frontend.tsx`:
-
-```tsx#frontend.tsx
-import React from "react";
-import { createRoot } from "react-dom/client";
-
-// import .css files directly and it works
-import './index.css';
-
-const root = createRoot(document.body);
-
-export default function Frontend() {
-  return <h1>Hello, world!</h1>;
-}
-
-root.render(<Frontend />);
-```
-
-Then, run index.ts
-
-```sh
-bun --hot ./index.ts
-```
-
-For more information, read the Bun API docs in `node_modules/bun-types/docs/**.mdx`.
+- Bun, not Node: `bun <file>`, `bun install`, `bun test`, `bunx`. `.env` loads automatically.
+- Prefer built-ins (`Bun.serve`, `WebSocket`, `Bun.file`) over dependencies.
+- `bunx tsc --noEmit` before committing.
+- Every script takes `BUSY_BAR_ADDR` and works without it.
+- Comments explain *why* — a firmware constraint, a spec inaccuracy, an ordering
+  requirement. The code already says what it does.
+- When you learn something about the device that isn't in DEVICE.md, add it there in the
+  same commit. That file is the reason later work is fast.

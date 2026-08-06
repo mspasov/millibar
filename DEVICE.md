@@ -314,62 +314,16 @@ override.
 7. Encoded a custom 90-frame plasma `.anim` (src/anim.ts), uploaded via
    `/api/assets/upload`, played it looping on the front display, and confirmed
    via `/api/screen` captures that frames were animating. ✅
+8. Streamed input events over the state WebSocket — buttons, mode switch, and encoder,
+   confirmed with both injected keys and physical presses. ✅
+9. Pulsed and crossfaded the status light. Confirmed visually by the device's owner;
+   the light is not observable over the API. ✅
 
-## Apps in this repo
+## Where the app-level docs live
 
-| Script | What it does |
-|---|---|
-| `bun run index.ts` | Connectivity smoke test — prints device status and busy-timer state. |
-| `bun run src/monitor.ts` | Shows Claude Code usage limits; rotate the encoder to cycle windows. |
-| `bun run src/plasma.ts [seconds]` | Generates, uploads, and plays a looping plasma animation. |
-| `bun run src/input.ts` | Prints button, switch, and encoder events from the device live. |
-| `bun run src/led.ts pulse\|fade …` | Pulses or crossfades the status light (see Status light below). |
-| `bun run src/screenshot.ts [out] [front\|back] [scale]` | Captures a display to PNG (handles the BGR readback). |
-
-### Usage monitor
-
-`src/monitor.ts` reads Claude Code's OAuth usage limits and renders one window at a time
-as a labelled percentage plus a progress bar, recolouring by severity (green < 50% <
-amber < 80% < red). It redraws every poll with a timeout of 1.5× the interval, so the
-display self-clears if the process dies, and Ctrl-C clears it explicitly.
-
-**Rotating the device's encoder cycles through the windows** — `5H`, `7D`, and one per
-active model-scoped weekly limit (e.g. `FABLE`). The list is rebuilt on each poll since
-the API adds and drops model windows, and the current selection follows its label across
-refreshes rather than its index. Draws are serialised so a fast spin cannot interleave
-with a poll's redraw.
-
-**Pressing any button refreshes immediately** rather than waiting out the poll interval.
-While a fetch is in flight, three cyan dots appear between the label and the percentage;
-they stay up for at least 300ms so a sub-second fetch still registers visually. The status
-light also fades cyan in and out twice over ~1.4s via `src/led.ts`.
-Refreshes fire on `PRESS` only (`RELEASE` would double-trigger) and are gated by
-`REFRESH_COOLDOWN_MS` (default 5s); a 429 extends that gate for the whole `Retry-After`
-window so a button cannot provoke the rate limit again. Because `BACK` dismisses the
-Canvas app (see below), binding refresh to buttons also means a `BACK` press redraws
-within ~1s instead of leaving the display blank until the next poll.
-
-> Buttons keep their native device functions as well — depending on device state, `OK`
-> and `START` can start a BUSY session. That is the device's own behaviour, not something
-> the monitor triggers, but it is worth knowing before you reach over and tap `OK`.
-
-Usage data comes from `GET https://api.anthropic.com/api/oauth/usage` with an
-`anthropic-beta: oauth-2025-04-20` header, authorised by the OAuth token Claude Code
-stores in the macOS Keychain (`~/.claude/.credentials.json` elsewhere). `src/usage.ts`
-is a port of [ai-token-monitor](https://github.com/)'s `src-tauri/src/oauth_usage.rs`.
-Notable details inherited from it:
-
-- A Keychain service can hold several items, some carrying only `mcpOAuth` and no usable
-  token — try multiple account candidates and accept only an item yielding `claudeAiOauth`.
-- Claude Code v2.1.52+ uses a hashed service name, `Claude Code-credentials-{hash}`.
-- Token refresh is delegated to `claude auth status --json` rather than reimplementing
-  the OAuth exchange.
-- `resets_at` is `null` on windows with no scheduled reset — it must be optional.
-- Per-model weekly limits now arrive as active `weekly_scoped` entries in the `limits`
-  array (with `scope.model.display_name`); the legacy `seven_day_sonnet` / `seven_day_opus`
-  keys return `null`.
-
-Env: `BUSY_BAR_ADDR`, `BUSY_PRIORITY` (default 50), `POLL_INTERVAL_MS` (default 300000).
+This file is device and protocol knowledge only. For what the scripts in this repo do and
+how to run them, see [README.md](README.md); for the Claude Code usage endpoint the monitor
+reads, see [USAGE-API.md](USAGE-API.md).
 
 ## Library gotchas
 
