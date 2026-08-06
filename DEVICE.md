@@ -104,6 +104,38 @@ curl -X POST http://10.0.4.20/api/display/draw \
 curl -X DELETE "http://10.0.4.20/api/display/draw?application_name=my_app"
 ```
 
+### Animations (`.anim` format)
+
+The firmware is open source ([busy-app/busybar-firmware](https://github.com/busy-app/busybar-firmware))
+and defines a custom animation container, `bicycle0` — see `lib/anim_file/anim_file_format.h`
+and the encoders `scripts/seq2anim.py` / `assets/frontend/util/seq2anim.ts`.
+This repo has a TypeScript encoder in [`src/anim.ts`](src/anim.ts).
+
+File layout (all integers little-endian):
+
+- **Header** (36 bytes): signature `bicycle0`, flags u8, width u8, height u8,
+  color_format u8 (0 = BGR888, 1 = Gray4, 2 = BGRA8888), fps u8, max_encoded_len u16,
+  unused u8, sections_chunk_len u32, frames_chunk_len u32, section_count u32,
+  file_frame_count u32, display_frame_count u32.
+- **Sections chunk**: per section — start u32, end u32 (display-frame indices),
+  frame_offs u32 (file offset of the file frame containing `start`),
+  duration_override u8, then a nul-terminated name. A section named `default`
+  covering all frames is mandatory.
+- **Frames chunk**: per file frame — encoding u8 (0 = raw, 1 = RLE), duration u8
+  (number of display frames this file frame covers; identical consecutive frames
+  are folded), encoded_len u16, then the data.
+- **RLE codec**: opcode with high bit set = verbatim run (low 7 bits = block count,
+  blocks follow); otherwise repeat run (opcode = count, one block follows).
+  Block = one pixel (3 bytes BGR). Max 127 blocks per opcode.
+
+Playback: upload with `POST /api/assets/upload?application_name=<app>&file=<name>.anim`
+(raw binary body), then draw an `animation` element with `path: "<name>.anim"` and the
+same `application_name`. Stock animations live in `/ext/apps_assets/shared/animations/`
+(e.g. `coding_72x16.anim`) and play via `stock_path: "shared/coding_72x16.anim"`.
+
+Working example: `bun run src/plasma.ts [seconds]` generates a looping rainbow
+plasma, uploads it, and plays it on the front display.
+
 ### Reading the screen back
 
 `GET /api/screen?display=0|1` (0 = front, 1 = back).
@@ -118,3 +150,15 @@ curl -X DELETE "http://10.0.4.20/api/display/draw?application_name=my_app"
 3. `POST /api/display/draw` → drew "CLAUDE: IT WORKS" in green → `{"result":"OK"}`. ✅
 4. `GET /api/screen?display=0` → decoded framebuffer, confirmed the text rendered on the LEDs. ✅
 5. `DELETE /api/display/draw?application_name=claude_test` → display cleared. ✅
+6. Played stock animation via `stock_path: "shared/coding_72x16.anim"`. ✅
+7. Encoded a custom 90-frame plasma `.anim` (src/anim.ts), uploaded via
+   `/api/assets/upload`, played it looping on the front display, and confirmed
+   via `/api/screen` captures that frames were animating. ✅
+
+## Library gotchas
+
+- Status sub-objects (`device`, `firmware`, `power`, `system`) are typed optional —
+  use optional chaining.
+- Animation elements require explicit `await_previous_end` and `opacity` in TS
+  even though the API defaults them.
+- `AssetsUpload` accepts `data: Buffer | Blob | File | ArrayBuffer` (no `Uint8Array`).
