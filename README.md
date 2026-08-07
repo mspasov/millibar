@@ -74,6 +74,11 @@ and a progress bar recoloured by severity (green below 50%, amber below 80%, red
 The countdown (`4:59`, `6D4H`, `59M`) ticks once a minute and drops precision — or hides —
 when a long model label leaves it no room.
 
+A faint tick on the bar marks how much of the window has elapsed, so the bar reads as a
+race: fill ahead of the tick means tokens are going faster than time. Under pace the tick
+sits in the empty track, just lighter than it; over pace it sits submerged in the fill as
+a darker notch of the severity colour.
+
 - **Rotate the encoder** to cycle `5H` → `7D` → per-model windows (e.g. `FABLE`). The list
   is rebuilt each poll, since the API adds and drops model windows; the selection follows
   its label rather than its index so a refresh never jumps you elsewhere.

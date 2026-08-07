@@ -6,8 +6,9 @@
  * button refreshes the data immediately instead of waiting for the next poll.
  *
  * Layout (72x16): window label on the left, reset countdown in dark grey and
- * percentage on the right, and a progress bar along the bottom. Colour tracks
- * severity.
+ * percentage on the right, and a progress bar along the bottom. A faint tick
+ * on the bar marks how much of the window has elapsed — fill ahead of the tick
+ * means tokens are going faster than time. Colour tracks severity.
  *
  * Usage: bun run src/monitor.ts
  * Env:   BUSY_BAR_ADDR, BUSY_PRIORITY, POLL_INTERVAL_MS, REFRESH_COOLDOWN_MS
@@ -66,7 +67,13 @@ const COLORS = {
   stale: '#555555FF',
   reset: '#555555FF',
   refresh: '#00CCFFFF',
+  /** Pace tick over the empty track — just lighter than the #202020 track. */
+  pace: '#404040FF',
 } as const;
+
+/** Brightness of the pace tick when it sits inside the fill, as a fraction of
+ * the fill colour — dark enough to read as a notch, light enough to find. */
+const PACE_FILL_SCALE = 0.35;
 
 /** Elements persist by id until cleared or their timeout expires — a redraw
  * that simply omits one leaves it on screen. Hiding therefore means drawing it
@@ -93,12 +100,29 @@ const MIN_INDICATOR_MS = 300;
 interface View {
   label: string;
   window: UsageWindow;
+  /** Length of the usage window; its start is `resetsAt - periodMs`. */
+  periodMs: number;
 }
+
+const FIVE_HOURS_MS = 5 * 3_600_000;
+const SEVEN_DAYS_MS = 7 * 86_400_000;
 
 function severityColor(pct: number): string {
   if (pct >= 80) return COLORS.critical;
   if (pct >= 50) return COLORS.warn;
   return COLORS.ok;
+}
+
+/** Alpha doesn't dim the LEDs (only r/g/b are read), so "darker" means scaling
+ * the components themselves. Keeps the input's `#RRGGBBAA` shape, alpha FF. */
+function scaleRgb(color: string, factor: number): string {
+  let out = '#';
+  for (let i = 1; i < 7; i += 2) {
+    out += Math.round(parseInt(color.slice(i, i + 2), 16) * factor)
+      .toString(16)
+      .padStart(2, '0');
+  }
+  return `${out}FF`;
 }
 
 function formatReset(resetsAt: string | null): string {
@@ -157,11 +181,12 @@ function formatResetCompact(resetsAt: string | null, maxWidth: number): string {
  * come and go as the API adds or drops them, so this is rebuilt on every poll. */
 function buildViews(usage: Usage): View[] {
   const views: View[] = [];
-  if (usage.fiveHour) views.push({ label: '5H', window: usage.fiveHour });
-  if (usage.sevenDay) views.push({ label: '7D', window: usage.sevenDay });
+  if (usage.fiveHour) views.push({ label: '5H', window: usage.fiveHour, periodMs: FIVE_HOURS_MS });
+  if (usage.sevenDay) views.push({ label: '7D', window: usage.sevenDay, periodMs: SEVEN_DAYS_MS });
   for (const model of usage.models) {
     // Fonts are bitmap ASCII; uppercase keeps the label visually consistent.
-    views.push({ label: model.model.toUpperCase(), window: model });
+    // Model-scoped limits are weekly windows, like 7D.
+    views.push({ label: model.model.toUpperCase(), window: model, periodMs: SEVEN_DAYS_MS });
   }
   return views;
 }
@@ -187,6 +212,20 @@ async function render(view: View, stale: boolean, refreshing: boolean): Promise<
   const resetText = formatResetCompact(view.window.resetsAt, RESET_RIGHT_EDGE - labelEnd - RESET_GAP);
   // Hidden while the refresh dots occupy its spot, and when nothing fits.
   const resetColor = resetText && !refreshing ? COLORS.reset : HIDDEN(COLORS.reset);
+
+  // Pace tick: where "now" sits in the window, so the bar reads as a race —
+  // fill ahead of the tick means tokens are going faster than time. Clamped
+  // against clock skew and already-passed resets.
+  const remainingMs = view.window.resetsAt ? new Date(view.window.resetsAt).getTime() - Date.now() : NaN;
+  const timeFraction = Math.min(1, Math.max(0, 1 - remainingMs / view.periodMs));
+  const tickX = Number.isFinite(timeFraction) ? Math.round(timeFraction * (WIDTH - 1)) : 0;
+  // Which background the tick sits on decides its shade: submerged in the fill
+  // it darkens the severity colour, over the empty track it lightens the track.
+  const tickColor = Number.isFinite(timeFraction)
+    ? pct > 0 && tickX < fillWidth
+      ? scaleRgb(color, PACE_FILL_SCALE)
+      : COLORS.pace
+    : HIDDEN(COLORS.pace);
 
   await serialise(() =>
     displayDraw({
@@ -260,6 +299,23 @@ async function render(view: View, stale: boolean, refreshing: boolean): Promise<
           fill_colors: [fillColor],
           border_width: 0,
           border_color: fillColor,
+          timeout: DRAW_TIMEOUT_S,
+          display: 'front',
+        },
+        {
+          // Drawn after 'fill': later elements composite on top, and the tick
+          // must stay visible when submerged in the fill.
+          id: 'pace',
+          type: 'rectangle',
+          x: tickX,
+          y: BAR_Y,
+          width: 1,
+          height: BAR_HEIGHT,
+          radius: 0,
+          fill: 'solid',
+          fill_colors: [tickColor],
+          border_width: 0,
+          border_color: tickColor,
           timeout: DRAW_TIMEOUT_S,
           display: 'front',
         },
@@ -416,9 +472,9 @@ async function inputLoop(): Promise<void> {
   );
 }
 
-/** The reset countdown repaints once a minute between polls — a draw to the
- * device only, never a usage fetch — so "4:59" doesn't sit frozen for five
- * minutes. Skipped mid-refresh; the fetch path redraws on its own. */
+/** The reset countdown and pace tick repaint once a minute between polls — a
+ * draw to the device only, never a usage fetch — so "4:59" doesn't sit frozen
+ * for five minutes. Skipped mid-refresh; the fetch path redraws on its own. */
 const countdownTick = setInterval(() => {
   if (!refreshing) void redraw();
 }, 60_000);

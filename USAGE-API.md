@@ -72,6 +72,16 @@ use it, keep it in memory.
 }
 ```
 
+**Granularity is 1%.** `utilization` and `percent` are integers — every observed value
+(2026-08-06/07, dozens of samples) has been whole, and no field carries a finer-grained
+alternative: the per-window `limit_dollars`/`used_dollars`/`remaining_dollars` fields and
+`extra_usage.utilization` are null on a subscription plan, and `spend` only moves once
+paid extra-usage credits are being consumed. One percent of the 5-hour window is ±3
+minutes of time-budget; finer than that requires counting tokens locally (OTEL metrics or
+the transcript JSONL), which yields tokens but not percent-of-limit — the denominators
+are not disclosed. Windows also carry `group` and `severity` fields, and `scope` has a
+`surface` key (null so far).
+
 Parsing notes, each of which has broken a real implementation:
 
 - **`resets_at` is nullable.** A window at 0% utilisation reports `null`. A non-optional
