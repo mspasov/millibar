@@ -1,5 +1,8 @@
 {
   "name": "millibar",
+  "bin": {
+    "mbar": "./src/mbar.ts"
+  },
   "module": "index.ts",
   "type": "module",
   "private": true,

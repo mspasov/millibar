@@ -1,3 +1,4 @@
+#!/usr/bin/env bun
 /**
  * millibar — switchable monitor modules on the BUSY Bar front display.
  * Pressing the dial cycles modules (Claude Code usage, CPU load), START
@@ -9,7 +10,7 @@
  * modules themselves. Adding a monitor means writing one module file and
  * registering it here.
  *
- * Usage: bun run src/monitor.ts
+ * Usage: mbar (after `bun link`), or bun run src/mbar.ts
  * Env:   BUSY_BAR_ADDR, BUSY_PRIORITY, POLL_INTERVAL_MS, REFRESH_COOLDOWN_MS,
  *        SWITCH_BUTTON (which button the dial press reports as; default OK)
  */

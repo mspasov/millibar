@@ -133,8 +133,8 @@ widths, measured from `/api/screen` readbacks (firmware 1.1.1):
 - `align: mid_left` puts the first inked column exactly at `x`; `align: mid_right` puts
   the last inked column at `x − 2` (both fonts).
 
-`src/monitor.ts` embeds the small-font table to right-fit its reset countdown between a
-variable-width label and the percentage.
+`src/display.ts` embeds the small-font table (`textWidth()`), used to right-fit the
+monitor's reset countdown between a variable-width label and the percentage.
 
 ### Animations (`.anim` format)
 
@@ -321,9 +321,9 @@ Messages are protobuf-encoded `BSB_State.State` (schemas:
 | `EncoderEvent` | `delta` (sint32, zigzag-encoded) — the rotary dial |
 
 There is **no encoder-press event**: the protobuf defines exactly the three buttons
-above. A physical press of the dial must surface as one of them — assumed `OK`
-(unverified; check with `bun run src/input.ts` and press the dial; the monitor's
-`SWITCH_BUTTON` env var overrides the assumption).
+above. A physical press of the dial surfaces as `OK` — verified on hardware (pressing
+the dial switches the monitor's modules). The monitor's `SWITCH_BUTTON` env var can
+remap it.
 
 `bun run src/input.ts` prints these live; `src/input.ts` also exports `listenInput()` and
 `decodeInputEvents()`. It decodes only the input field and skips everything else (frames
@@ -468,7 +468,7 @@ reads, see [USAGE-API.md](USAGE-API.md).
   ```
 
   The field *is* part of its own `DisplayDrawParams` type, so this type-checks and
-  compiles cleanly while the status light never fires. `src/monitor.ts` posts draws
+  compiles cleanly while the status light never fires. `src/display.ts` posts draws
   with `fetch` instead (keeping the library's types) — see `displayDraw()` there.
   Worth checking whether other namespaces narrow their bodies the same way; verify with
   a local echo server rather than trusting the types.

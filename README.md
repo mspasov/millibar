@@ -16,6 +16,7 @@ fading cyan while it fetches.
 ```sh
 bun install
 bun run index.ts        # connectivity smoke test
+bun link                # installs the global `mbar` command (~/.bun/bin)
 ```
 
 `index.ts` should print your device's model, firmware, battery, and timer state. If it
@@ -26,7 +27,7 @@ hangs or errors, see [Troubleshooting](#troubleshooting).
 | Command | What it does |
 |---|---|
 | `bun run index.ts` | Smoke test — prints device status and busy-timer state. |
-| `bun run src/monitor.ts` | **The monitor.** Switchable modules on the display: Claude Code limits and CPU load. Dial press switches modules, rotation cycles views, `START` refreshes. |
+| `mbar` (or `bun run src/mbar.ts`) | **The monitor.** Switchable modules on the display: Claude Code limits and CPU load. Dial press switches modules, rotation cycles views, `START` refreshes. |
 | `bun run src/input.ts` | Prints button, switch, and encoder events live. |
 | `bun run src/led.ts pulse "#00CCFF" 1400 2` | Pulses the status light — colour, duration ms, cycles. |
 | `bun run src/led.ts fade "#F00,#0F0,#00F" 3000 hsv` | Crossfades through colour stops — stops, duration ms, `rgb`\|`hsv`. |
@@ -77,7 +78,7 @@ Each is usable on its own, not just by the monitor.
 - **`src/host.ts`** — `runHost()` runs modules against one device: input routing, module
   switching, the heartbeat repaint, status-light ownership, shutdown.
 - **`src/modules/`** — the modules themselves: `claude-usage.ts`, `cpu.ts`.
-- **`src/monitor.ts`** — the entry point that registers modules with the host.
+- **`src/mbar.ts`** — the entry point that registers modules with the host.
 
 ### Monitor behaviour
 
@@ -117,7 +118,7 @@ A module is one file in `src/modules/` implementing `MonitorModule` (see
 [src/module.ts](src/module.ts)): a `poll()` that updates its data and returns its own
 cadence and refresh cooldown, a `render()` that returns the element list for its current
 state, and optionally `onEncoder()` for internal views. Register it in
-[src/monitor.ts](src/monitor.ts) and the host does the rest — id namespacing, element
+[src/mbar.ts](src/mbar.ts) and the host does the rest — id namespacing, element
 scrubbing on switch, timeouts, input routing, and status-light arbitration. A Grok-usage
 module, say, is a sibling fetch client next to `src/usage.ts` plus a factory shaped like
 [src/modules/claude-usage.ts](src/modules/claude-usage.ts); nothing else changes.
