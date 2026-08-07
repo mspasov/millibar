@@ -85,6 +85,21 @@ export function scaleRgb(color: string, factor: number): string {
   return `${out}FF`;
 }
 
+/** Per-channel RGB lerp between two `#RRGGBBAA` colours: t=0 gives `a`, t=1
+ * gives `b`. Alpha is pinned to FF for the same reason as scaleRgb — partial
+ * alpha renders at full brightness, so it can't carry a fade. */
+export function mixRgb(a: string, b: string, t: number): string {
+  let out = '#';
+  for (let i = 1; i < 7; i += 2) {
+    const va = parseInt(a.slice(i, i + 2), 16);
+    const vb = parseInt(b.slice(i, i + 2), 16);
+    out += Math.round(va + (vb - va) * t)
+      .toString(16)
+      .padStart(2, '0');
+  }
+  return `${out}FF`;
+}
+
 /** Per-glyph ink widths of the small font, measured from `/api/screen`
  * readbacks (firmware 1.1.1) — see DEVICE.md. Glyphs are spaced 1px apart;
  * characters not listed use the common 4px, an overestimate for anything

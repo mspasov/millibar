@@ -5,6 +5,7 @@ import {
   DisplaySession,
   HIDDEN,
   formatResetCompact,
+  mixRgb,
   progressBar,
   scaleRgb,
   severityColor,
@@ -32,6 +33,12 @@ describe('colour helpers', () => {
   test('scaleRgb scales components and keeps alpha FF', () => {
     expect(scaleRgb('#FF3322FF', 0.35)).toBe('#59120cFF');
     expect(scaleRgb('#000000FF', 0.5)).toBe('#000000FF');
+  });
+
+  test('mixRgb lerps per channel, endpoints exact, alpha pinned FF', () => {
+    expect(mixRgb('#33DD66FF', '#FF3322FF', 0)).toBe('#33dd66FF');
+    expect(mixRgb('#33DD66FF', '#FF3322FF', 1)).toBe('#ff3322FF');
+    expect(mixRgb('#00000000', '#FFFFFF00', 0.5)).toBe('#808080FF');
   });
 });
 

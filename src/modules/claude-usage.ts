@@ -7,6 +7,9 @@
  * means tokens are going faster than time. Colour tracks severity. Rotating
  * the encoder cycles through the available limit windows (5-hour, 7-day, and
  * any per-model weekly windows such as Fable).
+ *
+ * Value changes animate (src/sweep.ts): polls, going stale, and encoder view
+ * switches all sweep the bar and roll the number instead of snapping.
  */
 import {
   COLORS,
@@ -18,6 +21,7 @@ import {
   textWidth,
   type DrawElement,
 } from '../display';
+import { PctSweep, sweepHead } from '../sweep';
 import { wrapIndex, type ModuleContext, type MonitorModule, type PollResult, type RenderFrame } from '../module';
 import { fetchUsage, NoCredentialsError, RateLimitError, type Usage, type UsageWindow } from '../usage';
 
@@ -84,6 +88,9 @@ export interface ClaudeUsageOptions {
   /** Floor between API fetches, so holding a button can't hammer the endpoint
    * into a 429. */
   refreshCooldownMs: number;
+  /** Sweep timings, overridable so tests can run instant (0). */
+  sweepMs?: number;
+  sweepCoolMs?: number;
   /** Injectable for tests. */
   fetchUsageImpl?: typeof fetchUsage;
 }
@@ -95,7 +102,24 @@ export function claudeUsageModule(options: ClaudeUsageOptions): MonitorModule {
   let viewIndex = 0;
   let stale = false;
 
+  const sweep = new PctSweep({
+    durationMs: options.sweepMs,
+    coolMs: options.sweepCoolMs,
+    onFrame: () => ctx?.requestRender(),
+  });
+  sweep.set(0, severityColor(0));
+
   const currentView = (): View | null => views[viewIndex] ?? null;
+
+  /** Point the sweep at the current view's value; staleness rides the colour,
+   * so going stale fades to grey in place instead of snapping. The first poll
+   * sweeps up from 0 — the startup reveal. */
+  const retarget = (): void => {
+    const view = currentView();
+    if (!view) return;
+    const pct = Math.max(0, Math.min(100, view.window.utilization));
+    sweep.to(pct, stale ? COLORS.stale : severityColor(pct));
+  };
 
   return {
     id: 'claude',
@@ -103,6 +127,7 @@ export function claudeUsageModule(options: ClaudeUsageOptions): MonitorModule {
 
     init(context) {
       ctx = context;
+      context.signal.addEventListener('abort', () => sweep.stop());
     },
 
     async poll(): Promise<PollResult> {
@@ -115,6 +140,7 @@ export function claudeUsageModule(options: ClaudeUsageOptions): MonitorModule {
         const sameView = views.findIndex((v) => v.label === previousLabel);
         viewIndex = sameView >= 0 ? sameView : Math.min(viewIndex, Math.max(views.length - 1, 0));
         stale = false;
+        retarget();
 
         const summary = views.map((v) => `${v.label} ${v.window.utilization}%`).join(' | ');
         const reset = currentView()?.window.resetsAt ?? null;
@@ -126,6 +152,7 @@ export function claudeUsageModule(options: ClaudeUsageOptions): MonitorModule {
         // Keep the last known values on screen, dimmed, rather than blanking.
         ctx?.log((error as Error).message);
         stale = true;
+        retarget();
         if (error instanceof RateLimitError) {
           // Hold button-triggered refreshes off for the whole back-off, not
           // just the usual cooldown, so a 429 isn't immediately provoked again.
@@ -140,8 +167,10 @@ export function claudeUsageModule(options: ClaudeUsageOptions): MonitorModule {
       const view = currentView();
       if (!view) return [];
 
-      const pct = Math.max(0, Math.min(100, view.window.utilization));
-      const color = stale ? COLORS.stale : severityColor(pct);
+      // The animated view of the data: pct is fractional mid-sweep, colour is
+      // mid-lerp. retarget() keeps the tween pointed at the current view.
+      const shown = sweep.current();
+      const { pct, color } = shown;
       const dotColor = frame.refreshing ? COLORS.refresh : HIDDEN(COLORS.refresh);
       const labelText = stale ? `${view.label}?` : view.label;
       const labelEnd = LABEL_X + textWidth(labelText) - 1;
@@ -219,6 +248,8 @@ export function claudeUsageModule(options: ClaudeUsageOptions): MonitorModule {
           border_color: tickColor,
           display: 'front',
         },
+        // After 'pace' for the same reason: a sweeping head passes over it.
+        sweepHead(shown, { y: BAR_Y, height: BAR_HEIGHT, width: WIDTH }),
         ...DOT_XS.map((x, i) => ({
           id: `dot${i}`,
           type: 'rectangle' as const,
@@ -239,6 +270,9 @@ export function claudeUsageModule(options: ClaudeUsageOptions): MonitorModule {
     onEncoder(delta) {
       if (views.length < 2) return;
       viewIndex = wrapIndex(viewIndex, delta, views.length);
+      // The label and countdown switch instantly; the bar and number sweep
+      // from the previous window's value to this one's.
+      retarget();
       const view = currentView();
       if (view) {
         ctx?.log(`-> ${view.label} ${view.window.utilization}% (${formatReset(view.window.resetsAt)})`);

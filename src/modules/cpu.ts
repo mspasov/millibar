@@ -9,10 +9,14 @@
  * label says which window it is rather than pretending to be instantaneous
  * CPU%. No activity indicator and no LED pulse: sampling is local and
  * instant, and a pulse every two seconds would strobe.
+ *
+ * Changes animate (src/sweep.ts), with a floor so ±1–2% sampling jitter jumps
+ * silently instead of flashing the bar's leading edge every poll.
  */
 import os from 'node:os';
 import { COLORS, progressBar, severityColor, type DrawElement } from '../display';
-import { wrapIndex, type MonitorModule, type PollResult } from '../module';
+import { wrapIndex, type ModuleContext, type MonitorModule, type PollResult } from '../module';
+import { PctSweep, sweepHead } from '../sweep';
 
 const WIDTH = 72;
 const BAR_Y = 12;
@@ -28,26 +32,59 @@ const WINDOWS = [
 /** loadavg only moves every ~5s; 2s keeps the bar lively without draw spam. */
 const POLL_MS = 2000;
 
-export function cpuModule(): MonitorModule {
+/** Load jitters a point or two on every poll, and a white-hot head flash each
+ * 2s would strobe — moves smaller than this (≤2px of bar) jump instead. */
+const MIN_SWEEP_DELTA = 3;
+
+export interface CpuOptions {
+  /** Sweep timings, overridable so tests can run instant (0). */
+  sweepMs?: number;
+  sweepCoolMs?: number;
+}
+
+export function cpuModule(options: CpuOptions = {}): MonitorModule {
   const cores = os.cpus().length;
+  let ctx: ModuleContext | null = null;
   let viewIndex = 0;
   let loads: number[] = [0, 0, 0];
+
+  const sweep = new PctSweep({
+    durationMs: options.sweepMs,
+    coolMs: options.sweepCoolMs,
+    onFrame: () => ctx?.requestRender(),
+  });
+  sweep.set(0, severityColor(0));
+
+  const pctFor = (window: number): number =>
+    Math.min(100, Math.round(((loads[window] ?? 0) / cores) * 100));
+
+  const retarget = (minSweepDelta = 0): void => {
+    const pct = pctFor(WINDOWS[viewIndex]!.index);
+    const color = severityColor(pct);
+    if (Math.abs(pct - sweep.current().pct) < minSweepDelta) sweep.set(pct, color);
+    else sweep.to(pct, color);
+  };
 
   return {
     id: 'cpu',
     title: 'CPU load',
 
+    init(context) {
+      ctx = context;
+      context.signal.addEventListener('abort', () => sweep.stop());
+    },
+
     async poll(): Promise<PollResult> {
       loads = os.loadavg();
+      retarget(MIN_SWEEP_DELTA);
       // Local sampling cannot fail or be rate-limited: no refresh hold at all.
       return { nextPollMs: POLL_MS, holdRefreshMs: 0 };
     },
 
     render(): DrawElement[] {
       const view = WINDOWS[viewIndex]!;
-      const load = loads[view.index] ?? 0;
-      const pct = Math.min(100, Math.round((load / cores) * 100));
-      const color = severityColor(pct);
+      const shown = sweep.current();
+      const { pct, color } = shown;
       return [
         {
           id: 'label',
@@ -63,7 +100,7 @@ export function cpuModule(): MonitorModule {
         {
           id: 'pct',
           type: 'text',
-          text: `${pct}%`,
+          text: `${Math.round(pct)}%`,
           font: 'normal',
           color,
           align: 'mid_right',
@@ -72,11 +109,15 @@ export function cpuModule(): MonitorModule {
           display: 'front',
         },
         ...progressBar({ pct, color, y: BAR_Y, width: WIDTH, height: BAR_HEIGHT }),
+        sweepHead(shown, { y: BAR_Y, height: BAR_HEIGHT, width: WIDTH }),
       ];
     },
 
     onEncoder(delta) {
       viewIndex = wrapIndex(viewIndex, delta, WINDOWS.length);
+      // View switches always sweep — the head flash doubles as feedback that
+      // the rotation registered, even when the windows' values sit close.
+      retarget();
     },
   };
 }

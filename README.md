@@ -33,6 +33,7 @@ it hangs or errors, see [Troubleshooting](#troubleshooting).
 | `bun run src/led.ts fade "#F00,#0F0,#00F" 3000 hsv` | Crossfades through colour stops — stops, duration ms, `rgb`\|`hsv`. |
 | `bun run tools/plasma.ts [seconds]` | Generates, uploads, and plays a looping plasma animation. |
 | `bun run tools/flame.ts [start-level]` | **Flame.** Fire rises from the bottom; the dial sets its intensity (16 levels). Changes glide one level at a time, phase-matched, so they're smooth *and* immediate. `--preview [out.png]` renders a local contact sheet instead. |
+| `bun run tools/sweep.ts [targets...]` | Test bench for the monitor's percentage-change animation: eased bar sweep, white-hot leading edge, rolling counter, severity-colour lerp. Scripted (`10 47 85`), interactive (no args), or `--demo`; reports the frame rate the device actually sustains. |
 | `bun run tools/chime.ts [freqs-hz...]` | Synthesizes a chime, uploads it, and plays it on the speaker. |
 | `bun run tools/click.ts [--once]` | Clicks the speaker whenever the rotary dial moves. |
 | `bun run tools/screenshot.ts [out.png] [front\|back] [scale]` | Captures a display to PNG. |
@@ -74,6 +75,9 @@ Each is usable on its own, not just by the monitor.
   draws, stamps timeouts, and scrubs elements whose ids disappear between draws (the
   firmware otherwise leaves them on screen). Also the shared render kit: severity
   colours, font metrics, the compact countdown, `progressBar()`.
+- **`src/sweep.ts`** — `PctSweep`, the time-based value animation the modules share:
+  eased sweeps, colour lerps, the bar's cooling leading edge. Frames are computed from
+  the wall clock, so slow draws drop frames instead of stretching the animation.
 - **`src/module.ts`** — the `MonitorModule` contract and per-module scheduler.
 - **`src/host.ts`** — `runHost()` runs modules against one device: input routing, module
   switching, the heartbeat repaint, status-light ownership, shutdown.
@@ -91,6 +95,15 @@ A faint tick on the bar marks how much of the window has elapsed, so the bar rea
 race: fill ahead of the tick means tokens are going faster than time. Under pace the tick
 sits in the empty track, just lighter than it; over pace it sits submerged in the fill as
 a darker notch of the severity colour.
+
+Value changes animate rather than snap: the bar sweeps to its new fill with ease-out, the
+percentage rolls through the intermediate values, the severity colour crossfades when a
+sweep crosses a band boundary, and a white-hot pixel rides the fill's leading edge,
+cooling into the bar once it lands. The same sweep plays when the encoder switches
+windows and when a module's data goes stale (a fade to grey in place). CPU load jitter
+under 3% jumps silently so the head doesn't flash every poll. The effect can be tuned and
+timed standalone with `bun run tools/sweep.ts`, which also reports the frame rate the
+device actually sustains.
 
 - **Press the dial** (its press arrives as the `OK` button event — override with
   `SWITCH_BUTTON` if your press reports differently) to switch to the next module:

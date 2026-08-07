@@ -19,10 +19,13 @@ const nullContext = (): ModuleContext => ({
   signal: new AbortController().signal,
 });
 
-function makeModule(fetchImpl: () => Promise<Usage>) {
+function makeModule(fetchImpl: () => Promise<Usage>, sweepMs = 0) {
   const module = claudeUsageModule({
     pollIntervalMs: 300_000,
     refreshCooldownMs: 5_000,
+    // Instant sweeps by default so renders show settled values.
+    sweepMs,
+    sweepCoolMs: 0,
     fetchUsageImpl: fetchImpl,
   });
   module.init?.(nullContext());
@@ -110,12 +113,12 @@ describe('poll', () => {
 });
 
 describe('render', () => {
-  test('produces the full 9-element frame with stable ids', async () => {
+  test('produces the full 10-element frame with stable ids', async () => {
     const module = makeModule(async () => usageFixture());
     await module.poll();
     const elements = module.render({ refreshing: false });
     expect(elements.map((el) => el.id)).toEqual([
-      'label', 'reset', 'pct', 'track', 'fill', 'pace', 'dot0', 'dot1', 'dot2',
+      'label', 'reset', 'pct', 'track', 'fill', 'pace', 'head', 'dot0', 'dot1', 'dot2',
     ]);
   });
 
@@ -134,7 +137,7 @@ describe('render', () => {
     await module.poll();
     const elements = module.render({ refreshing: true }) as Array<Record<string, unknown>>;
     const reset = elements[1]!;
-    const dot = elements[6]!;
+    const dot = elements[7]!;
     expect(reset.color).toBe(HIDDEN(COLORS.reset));
     expect(dot.fill_colors).toEqual([COLORS.refresh]);
   });
@@ -145,5 +148,36 @@ describe('render', () => {
     await module.poll();
     const pace = module.render({ refreshing: false })[5] as { x: number };
     expect(pace.x).toBe(43);
+  });
+
+  test('an encoder switch retargets the sweep to the new window', async () => {
+    const module = makeModule(async () => usageFixture());
+    await module.poll();
+    module.onEncoder!(1); // 5H 62% -> 7D 31%
+    const [, , pct, , fill] = module.render({ refreshing: false }) as Array<Record<string, unknown>>;
+    expect(pct).toMatchObject({ text: '31%', color: COLORS.ok });
+    expect(fill).toMatchObject({ width: Math.round((72 * 31) / 100) });
+  });
+
+  test('with a live sweep, a render right after the poll is still in flight', async () => {
+    // A sweep far longer than the test: the first frame shows the start of
+    // the roll up from 0% with the leading edge lit, not the settled value.
+    const controller = new AbortController();
+    const module = claudeUsageModule({
+      pollIntervalMs: 300_000,
+      refreshCooldownMs: 5_000,
+      sweepMs: 600_000,
+      fetchUsageImpl: async () => usageFixture(),
+    });
+    module.init?.({ ...nullContext(), signal: controller.signal });
+    try {
+      await module.poll();
+      await Bun.sleep(5); // just past t=0, where the eased pct is still exactly 0 and the head hidden
+      const [, , pct, , , , head] = module.render({ refreshing: false }) as Array<Record<string, unknown>>;
+      expect(pct).toMatchObject({ text: '0%' });
+      expect((head!.fill_colors as string[])[0]!.endsWith('00')).toBe(false);
+    } finally {
+      controller.abort(); // stops the sweep's repaint ticker
+    }
   });
 });
