@@ -424,6 +424,39 @@ Working examples: `bun run tools/chime.ts [freqs-hz...]` synthesizes a two-note 
 uploads it, and plays it; `bun run tools/click.ts` plays a synthesized ~25ms tick on
 every rotary-encoder event (`--once` for a single test click).
 
+### Storage (`/api/storage/*`)
+
+A real filesystem API over the ~7 GB `/ext` partition (`write`, `read`, `list`,
+`remove`, `mkdir`, `rename`, `status`). Every endpoint takes the path as a query
+param matching `^/ext(/[a-zA-Z0-9._\-]*)*$` — no spaces, and note `.`/`..` *do*
+match, so validate them yourself. `bbar` (tools/bbar.ts) wraps all of this;
+`src/store.ts` is the client. Probed on firmware 1.1.1 (2026-08-07):
+
+- **`remove` is recursive and never says no.** It deletes a non-empty directory
+  tree in one call, and returns `200 {"result":"OK"}` for paths that *don't
+  exist*. There is no rmdir-style safety and no "not found" signal — stat first
+  (by listing the parent) if you need either. This is why `bbar rm` requires
+  `-r` for directories and `--force` outside `/ext/user_assets`.
+- **`write` auto-creates exactly one missing directory level** (the immediate
+  parent). A target two levels deep fails `508 {"error":"Failed to open file for
+  writing"}` — mkdir the ancestors first for deep paths.
+- **`rename` silently overwrites an existing target** and does *not* create
+  target directories (400 if the destination dir is missing). It does move
+  across existing directories fine.
+- **`list` 400s on both a file path and a missing path** — indistinguishable
+  without listing the parent. `mkdir` also 400s when the directory already
+  exists. All failures are a generic `{"error":"Bad Request"}`.
+- `status` returns `{used_bytes, free_bytes, total_bytes}`; used + free = total
+  exactly.
+- `read`/`write` round-trip bytes exactly (raw octet-stream body, no encoding).
+
+Layout worth knowing: `/ext/user_assets/<application_name>/` is where
+`POST /api/assets/upload` writes; `/ext/apps_assets/shared/{animations,sounds}/`
+holds the stock assets that `stock_path` resolves against. Uploaded assets
+persist forever — nothing cleans up after a deleted script, so `bbar apps` /
+`bbar wipe <app>` exist. `DELETE /api/assets/upload?application_name=…`
+removes the app's asset *directory itself*, not just its contents.
+
 ## Live test performed (2026-08-06)
 
 1. `GET /api/status` → firmware 1.1.1, battery 66% charging, uptime ~21h. ✅
@@ -442,6 +475,11 @@ every rotary-encoder event (`--once` for a single test click).
 10. (2026-08-07) Played the stock `shared/volume_change.snd` — heard by the device's
     owner — then synthesized a 0.82s two-note chime as raw s16le PCM (tools/chime.ts),
     uploaded it, and played it back. ✅
+11. (2026-08-07) Probed every `/api/storage/*` endpoint under a throwaway
+    `/ext/user_assets/cli_test*` tree — recursive remove, remove-on-missing → 200,
+    write's one-level dir creation, rename overwrite — then exercised the full
+    `bbar` CLI (transfers, guards, push/wipe) against the device and left the
+    tree clean. ✅
 
 ## Where the app-level docs live
 

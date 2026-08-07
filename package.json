@@ -1,7 +1,8 @@
 {
   "name": "millibar",
   "bin": {
-    "mbar": "./src/mbar.ts"
+    "mbar": "./src/mbar.ts",
+    "bbar": "./tools/bbar.ts"
   },
   "type": "module",
   "private": true,

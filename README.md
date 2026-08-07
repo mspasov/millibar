@@ -16,7 +16,7 @@ fading cyan while it fetches.
 ```sh
 bun install
 bun run tools/smoke.ts        # connectivity smoke test
-bun link                # installs the global `mbar` command (~/.bun/bin)
+bun link                # installs the global `mbar` and `bbar` commands (~/.bun/bin)
 ```
 
 The smoke test should print your device's model, firmware, battery, and timer state. If
@@ -36,6 +36,7 @@ it hangs or errors, see [Troubleshooting](#troubleshooting).
 | `bun run tools/chime.ts [freqs-hz...]` | Synthesizes a chime, uploads it, and plays it on the speaker. |
 | `bun run tools/click.ts [--once]` | Clicks the speaker whenever the rotary dial moves. |
 | `bun run tools/screenshot.ts [out.png] [front\|back] [scale]` | Captures a display to PNG. |
+| `bbar` (or `bun run tools/bbar.ts`) | **Storage CLI.** Browse and manage the device's 7 GB `/ext` partition and per-app assets: `ls`/`df`/`cat`/`get`/`put`/`mv`/`mkdir`/`rm`, plus `apps`/`push`/`wipe` for asset directories. `bbar help` for the full list. |
 
 ## Configuration
 
