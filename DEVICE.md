@@ -111,6 +111,22 @@ curl -X POST http://10.0.4.20/api/display/draw \
 curl -X DELETE "http://10.0.4.20/api/display/draw?application_name=my_app"
 ```
 
+#### Font metrics (measured)
+
+Both text fonts are variable-width bitmaps with 1px between glyphs. Per-glyph ink
+widths, measured from `/api/screen` readbacks (firmware 1.1.1):
+
+- **`small`** — 5px tall; mid-aligned at `y: 5` renders rows 3–7. Caps default to 4px
+  with exceptions `I:1`, `M:5`, `W:5`, and `J L T V X Y Z` at 3; digits are 3px (`1` is
+  2); `?` 3; `:` and `.` 1.
+- **`normal`** — 7px tall; mid-aligned at `y: 5` renders rows 2–8. Digits are all 5px;
+  `%` is 7.
+- `align: mid_left` puts the first inked column exactly at `x`; `align: mid_right` puts
+  the last inked column at `x − 2` (both fonts).
+
+`src/monitor.ts` embeds the small-font table to right-fit its reset countdown between a
+variable-width label and the percentage.
+
 ### Animations (`.anim` format)
 
 The firmware is open source ([busy-app/busybar-firmware](https://github.com/busy-app/busybar-firmware))

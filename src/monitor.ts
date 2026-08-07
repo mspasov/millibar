@@ -5,8 +5,9 @@
  * (5-hour, 7-day, and any per-model weekly windows such as Fable). Pressing any
  * button refreshes the data immediately instead of waiting for the next poll.
  *
- * Layout (72x16): window label on the left, percentage on the right, and a
- * progress bar along the bottom. Colour tracks severity.
+ * Layout (72x16): window label on the left, reset countdown in dark grey and
+ * percentage on the right, and a progress bar along the bottom. Colour tracks
+ * severity.
  *
  * Usage: bun run src/monitor.ts
  * Env:   BUSY_BAR_ADDR, BUSY_PRIORITY, POLL_INTERVAL_MS, REFRESH_COOLDOWN_MS
@@ -63,6 +64,7 @@ const COLORS = {
   track: '#202020FF',
   label: '#8899AAFF',
   stale: '#555555FF',
+  reset: '#555555FF',
   refresh: '#00CCFFFF',
 } as const;
 
@@ -71,8 +73,18 @@ const COLORS = {
  * with zero alpha, not dropping it from the list. */
 const HIDDEN = (color: string) => `${color.slice(0, 7)}00`;
 
-/** Activity dots, shown between the label and the percentage while fetching. */
-const DOT_XS = [36, 40, 44];
+const LABEL_X = 2;
+/** `mid_right` renders its last inked column 2px left of the anchor (measured,
+ * both fonts), so anchoring at 43 puts the countdown's right edge at column 41
+ * — two clear columns before the widest percentage ("100%" starts at 44). */
+const RESET_ANCHOR_X = 43;
+const RESET_RIGHT_EDGE = RESET_ANCHOR_X - 2;
+/** Minimum dark columns between the label and the reset countdown. */
+const RESET_GAP = 2;
+
+/** Activity dots, swapped in (by alpha) for the reset countdown while
+ * fetching — right-aligned on the same column so they clear the label too. */
+const DOT_XS = [RESET_RIGHT_EDGE - 9, RESET_RIGHT_EDGE - 5, RESET_RIGHT_EDGE - 1];
 const DOT_Y = 4;
 const DOT_SIZE = 2;
 /** Floor on how long the dots stay up, so a fast fetch still registers visually. */
@@ -98,6 +110,47 @@ function formatReset(resetsAt: string | null): string {
   return hours >= 24
     ? `resets in ${Math.floor(hours / 24)}d ${hours % 24}h`
     : `resets in ${hours}h ${minutes}m`;
+}
+
+/** Per-glyph ink widths of the small font, measured from `/api/screen`
+ * readbacks (firmware 1.1.1) — see DEVICE.md. Glyphs are spaced 1px apart;
+ * characters not listed use the common 4px, an overestimate for anything
+ * unmeasured, which errs toward shortening the countdown rather than letting
+ * text collide. */
+const SMALL_GLYPH_WIDTHS: Record<string, number> = {
+  I: 1, J: 3, L: 3, M: 5, T: 3, V: 3, W: 5, X: 3, Y: 3, Z: 3,
+  '0': 3, '1': 2, '2': 3, '3': 3, '4': 3, '5': 3, '6': 3, '7': 3, '8': 3, '9': 3,
+  '?': 3, ':': 1, '.': 1,
+};
+
+function textWidth(text: string): number {
+  let width = 0;
+  for (const ch of text) width += (SMALL_GLYPH_WIDTHS[ch] ?? 4) + 1;
+  return Math.max(0, width - 1);
+}
+
+/**
+ * Compact countdown for the display: the most precise variant that fits
+ * `maxWidth` pixels of small font — "4:59" falling back to "4H" under a day,
+ * "6D4H" falling back to "6D" above it, "59M" under an hour. Returns '' when
+ * no reset is scheduled or nothing fits (a long model label can leave too few
+ * columns before the percentage).
+ */
+function formatResetCompact(resetsAt: string | null, maxWidth: number): string {
+  if (!resetsAt) return '';
+  const ms = new Date(resetsAt).getTime() - Date.now();
+  if (!Number.isFinite(ms)) return '';
+  const totalMinutes = Math.max(0, Math.ceil(ms / 60_000));
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  const candidates =
+    days > 0
+      ? [hours > 0 ? `${days}D${hours}H` : `${days}D`, `${days}D`]
+      : hours > 0
+        ? [`${hours}:${String(minutes).padStart(2, '0')}`, `${hours}H`]
+        : [`${minutes}M`];
+  return candidates.find((c) => textWidth(c) <= maxWidth) ?? '';
 }
 
 /** The windows available to cycle through, in a stable order. Per-model windows
@@ -129,6 +182,11 @@ async function render(view: View, stale: boolean, refreshing: boolean): Promise<
   const fillWidth = Math.max(1, Math.round((WIDTH * pct) / 100));
   const fillColor = pct > 0 ? color : HIDDEN(color);
   const dotColor = refreshing ? COLORS.refresh : HIDDEN(COLORS.refresh);
+  const labelText = stale ? `${view.label}?` : view.label;
+  const labelEnd = LABEL_X + textWidth(labelText) - 1;
+  const resetText = formatResetCompact(view.window.resetsAt, RESET_RIGHT_EDGE - labelEnd - RESET_GAP);
+  // Hidden while the refresh dots occupy its spot, and when nothing fits.
+  const resetColor = resetText && !refreshing ? COLORS.reset : HIDDEN(COLORS.reset);
 
   await serialise(() =>
     displayDraw({
@@ -140,11 +198,25 @@ async function render(view: View, stale: boolean, refreshing: boolean): Promise<
         {
           id: 'label',
           type: 'text',
-          text: stale ? `${view.label}?` : view.label,
+          text: labelText,
           font: 'small',
           color: stale ? COLORS.stale : COLORS.label,
           align: 'mid_left',
-          x: 2,
+          x: LABEL_X,
+          y: 5,
+          timeout: DRAW_TIMEOUT_S,
+          display: 'front',
+        },
+        {
+          id: 'reset',
+          type: 'text',
+          // Kept non-empty even when hidden: the element persists by id, and a
+          // redraw carrying the previous text under zero alpha renders nothing.
+          text: resetText || '0',
+          font: 'small',
+          color: resetColor,
+          align: 'mid_right',
+          x: RESET_ANCHOR_X,
           y: 5,
           timeout: DRAW_TIMEOUT_S,
           display: 'front',
@@ -343,6 +415,14 @@ async function inputLoop(): Promise<void> {
     { signal: controller.signal, onError: (e) => console.error(e.message) }
   );
 }
+
+/** The reset countdown repaints once a minute between polls — a draw to the
+ * device only, never a usage fetch — so "4:59" doesn't sit frozen for five
+ * minutes. Skipped mid-refresh; the fetch path redraws on its own. */
+const countdownTick = setInterval(() => {
+  if (!refreshing) void redraw();
+}, 60_000);
+controller.signal.addEventListener('abort', () => clearInterval(countdownTick));
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, () => {

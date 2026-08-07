@@ -69,14 +69,16 @@ Each is usable on its own, not just by the monitor.
 
 ### Usage monitor behaviour
 
-One window at a time: a label, a percentage, and a progress bar recoloured by severity
-(green below 50%, amber below 80%, red above).
+One window at a time: a label, a dark-grey countdown to the window's reset, a percentage,
+and a progress bar recoloured by severity (green below 50%, amber below 80%, red above).
+The countdown (`4:59`, `6D4H`, `59M`) ticks once a minute and drops precision — or hides —
+when a long model label leaves it no room.
 
 - **Rotate the encoder** to cycle `5H` → `7D` → per-model windows (e.g. `FABLE`). The list
   is rebuilt each poll, since the API adds and drops model windows; the selection follows
   its label rather than its index so a refresh never jumps you elsewhere.
-- **Press any button** to refresh immediately. Three cyan dots appear while fetching and
-  the status light fades. During cooldown a press still repaints (without refetching), so
+- **Press any button** to refresh immediately. Three cyan dots replace the countdown
+  while fetching and the status light fades. During cooldown a press still repaints (without refetching), so
   a blank screen is always recoverable.
 - Draws carry a timeout of 1.5× the poll interval, so the display **self-clears if the
   process dies**. Ctrl-C clears it explicitly.
