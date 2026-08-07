@@ -141,7 +141,7 @@ monitor's reset countdown between a variable-width label and the percentage.
 The firmware is open source ([busy-app/busybar-firmware](https://github.com/busy-app/busybar-firmware))
 and defines a custom animation container, `bicycle0` — see `lib/anim_file/anim_file_format.h`
 and the encoders `scripts/seq2anim.py` / `assets/frontend/util/seq2anim.ts`.
-This repo has a TypeScript encoder in [`src/anim.ts`](src/anim.ts).
+This repo has a TypeScript encoder in [`src/anim.ts`](../src/anim.ts).
 
 File layout (all integers little-endian):
 
@@ -172,7 +172,7 @@ multi-section file is therefore the right shape for state-driven animations:
 pre-render N states as sections, and a state change is a single small draw.
 Sections may start mid-way through a folded file frame — `duration_override`
 carries the remaining repeat count (see `seq2anim.py` in the firmware repo).
-`src/anim.ts` encodes extra named sections; verified live by `src/flame.ts`
+`src/anim.ts` encodes extra named sections; verified live by `tools/flame.ts`
 (17 sections, ~1.3 MiB, uploads in a few seconds).
 
 Switching behaviour, all verified against `/api/screen` (a wipe test animation
@@ -199,7 +199,7 @@ makes playback position readable; flame frames were then matched byte-exact):
   (state, phase), read the current phase by frame-matching one `/api/screen`
   capture, and draw the target state's section at that phase plus ~3 frames of
   capture+draw latency. The switch lands mid-loop in step with what was playing.
-  `src/flame.ts` glides between its 16 levels this way, one level per ~150 ms;
+  `tools/flame.ts` glides between its 16 levels this way, one level per ~150 ms;
   641 sections in a 2.7 MiB file are accepted without complaint, and measured
   step transitions are the size of ~2 ordinary frames of motion.
 
@@ -212,8 +212,8 @@ restart-on-redraw caveat above.
 swap), so matching captures against locally rendered frames identifies the exact
 display frame playing — the debugging primitive behind all of the above.
 
-Working example: `bun run src/plasma.ts [seconds]` generates a looping rainbow
-plasma, uploads it, and plays it on the front display. `bun run src/flame.ts` plays
+Working example: `bun run tools/plasma.ts [seconds]` generates a looping rainbow
+plasma, uploads it, and plays it on the front display. `bun run tools/flame.ts` plays
 a fire animation whose intensity the rotary encoder steps through 16 pre-rendered
 section levels.
 
@@ -380,7 +380,7 @@ override.
 >    library does the swap in `Global/utils/frameData.ts:bgrToRgba`.
 >
 > Colours you *send* (`#RRGGBBAA` in draw requests) are ordered as documented — only the
-> readback is BGR. `bun run src/screenshot.ts [out.png] [front|back] [scale]` handles this.
+> readback is BGR. `bun run tools/screenshot.ts [out.png] [front|back] [scale]` handles this.
 
 ### Audio (`.snd` format)
 
@@ -420,8 +420,8 @@ Playback timing (`applications/services/audio/audio.c` in the firmware):
   shorten it. It also caps the effective rate at ~8 sounds/s; throttle client-side
   rather than queueing.
 
-Working examples: `bun run src/chime.ts [freqs-hz...]` synthesizes a two-note chime,
-uploads it, and plays it; `bun run src/click.ts` plays a synthesized ~25ms tick on
+Working examples: `bun run tools/chime.ts [freqs-hz...]` synthesizes a two-note chime,
+uploads it, and plays it; `bun run tools/click.ts` plays a synthesized ~25ms tick on
 every rotary-encoder event (`--once` for a single test click).
 
 ## Live test performed (2026-08-06)
@@ -432,7 +432,7 @@ every rotary-encoder event (`--once` for a single test click).
 4. `GET /api/screen?display=0` → decoded framebuffer, confirmed the text rendered on the LEDs. ✅
 5. `DELETE /api/display/draw?application_name=claude_test` → display cleared. ✅
 6. Played stock animation via `stock_path: "shared/coding_72x16.anim"`. ✅
-7. Encoded a custom 90-frame plasma `.anim` (src/anim.ts), uploaded via
+7. Encoded a custom 90-frame plasma `.anim` (../src/anim.ts), uploaded via
    `/api/assets/upload`, played it looping on the front display, and confirmed
    via `/api/screen` captures that frames were animating. ✅
 8. Streamed input events over the state WebSocket — buttons, mode switch, and encoder,
@@ -440,7 +440,7 @@ every rotary-encoder event (`--once` for a single test click).
 9. Pulsed and crossfaded the status light. Confirmed visually by the device's owner;
    the light is not observable over the API. ✅
 10. (2026-08-07) Played the stock `shared/volume_change.snd` — heard by the device's
-    owner — then synthesized a 0.82s two-note chime as raw s16le PCM (src/chime.ts),
+    owner — then synthesized a 0.82s two-note chime as raw s16le PCM (tools/chime.ts),
     uploaded it, and played it back. ✅
 
 ## Where the app-level docs live

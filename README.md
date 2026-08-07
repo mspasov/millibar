@@ -15,27 +15,27 @@ fading cyan while it fetches.
 
 ```sh
 bun install
-bun run index.ts        # connectivity smoke test
+bun run tools/smoke.ts        # connectivity smoke test
 bun link                # installs the global `mbar` command (~/.bun/bin)
 ```
 
-`index.ts` should print your device's model, firmware, battery, and timer state. If it
-hangs or errors, see [Troubleshooting](#troubleshooting).
+The smoke test should print your device's model, firmware, battery, and timer state. If
+it hangs or errors, see [Troubleshooting](#troubleshooting).
 
 ## Scripts
 
 | Command | What it does |
 |---|---|
-| `bun run index.ts` | Smoke test — prints device status and busy-timer state. |
+| `bun run tools/smoke.ts` | Smoke test — prints device status and busy-timer state. |
 | `mbar` (or `bun run src/mbar.ts`) | **The monitor.** Switchable modules on the display: Claude Code limits and CPU load. Dial press switches modules, rotation cycles views, `START` refreshes. |
 | `bun run src/input.ts` | Prints button, switch, and encoder events live. |
 | `bun run src/led.ts pulse "#00CCFF" 1400 2` | Pulses the status light — colour, duration ms, cycles. |
 | `bun run src/led.ts fade "#F00,#0F0,#00F" 3000 hsv` | Crossfades through colour stops — stops, duration ms, `rgb`\|`hsv`. |
-| `bun run src/plasma.ts [seconds]` | Generates, uploads, and plays a looping plasma animation. |
-| `bun run src/flame.ts [start-level]` | **Flame.** Fire rises from the bottom; the dial sets its intensity (16 levels). Changes glide one level at a time, phase-matched, so they're smooth *and* immediate. `--preview [out.png]` renders a local contact sheet instead. |
-| `bun run src/chime.ts [freqs-hz...]` | Synthesizes a chime, uploads it, and plays it on the speaker. |
-| `bun run src/click.ts [--once]` | Clicks the speaker whenever the rotary dial moves. |
-| `bun run src/screenshot.ts [out.png] [front\|back] [scale]` | Captures a display to PNG. |
+| `bun run tools/plasma.ts [seconds]` | Generates, uploads, and plays a looping plasma animation. |
+| `bun run tools/flame.ts [start-level]` | **Flame.** Fire rises from the bottom; the dial sets its intensity (16 levels). Changes glide one level at a time, phase-matched, so they're smooth *and* immediate. `--preview [out.png]` renders a local contact sheet instead. |
+| `bun run tools/chime.ts [freqs-hz...]` | Synthesizes a chime, uploads it, and plays it on the speaker. |
+| `bun run tools/click.ts [--once]` | Clicks the speaker whenever the rotary dial moves. |
+| `bun run tools/screenshot.ts [out.png] [front\|back] [scale]` | Captures a display to PNG. |
 
 ## Configuration
 
@@ -56,7 +56,7 @@ Each is usable on its own, not just by the monitor.
 
 - **`src/usage.ts`** — reads Claude Code's own usage limits (5-hour, 7-day, per-model)
   from an undocumented endpoint, using the OAuth token Claude Code already stores. See
-  [USAGE-API.md](USAGE-API.md).
+  [USAGE-API.md](docs/USAGE-API.md).
 - **`src/input.ts`** — `listenInput()` streams button, switch, and encoder events off the
   device's protobuf WebSocket. Decodes only the input field, so it needs no protobuf
   runtime.
@@ -69,7 +69,6 @@ Each is usable on its own, not just by the monitor.
   local previews.
 - **`src/snd.ts`** — `pcm16()` converts float samples to the device's `.snd` audio format
   (raw s16le mono 44.1 kHz).
-- **`src/screenshot.ts`** — captures a display to PNG, handling the BGR framebuffer.
 - **`src/display.ts`** — the draw transport plus `DisplaySession`, which serialises
   draws, stamps timeouts, and scrubs elements whose ids disappear between draws (the
   firmware otherwise leaves them on screen). Also the shared render kit: severity
@@ -130,7 +129,7 @@ reachable at `http://busy.bar/`. Over USB-Ethernet the address is fixed at `10.0
 
 **Display went black.** Most likely `BACK` was pressed, which dismisses the drawing layer
 and drops to a stub app that renders nothing — the display is not off. Any draw reclaims
-it. See [DEVICE.md](DEVICE.md#display-priority-and-the-back-button).
+it. See [DEVICE.md](docs/DEVICE.md#display-priority-and-the-back-button).
 
 **`Not drawn due to low priority`.** Another app holds the display at an equal or higher
 priority. Clear it (`curl -X DELETE "http://10.0.4.20/api/display/draw?application_name=NAME"`)
@@ -144,10 +143,10 @@ recovers on its own.
 
 ## Documentation
 
-- **[DEVICE.md](DEVICE.md)** — everything learned about the hardware and its HTTP API:
+- **[DEVICE.md](docs/DEVICE.md)** — everything learned about the hardware and its HTTP API:
   drawing, priorities, the animation format, input events, the status light, and the
   spec's inaccuracies. Read this before touching device code.
-- **[USAGE-API.md](USAGE-API.md)** — the undocumented Claude Code usage endpoint.
+- **[USAGE-API.md](docs/USAGE-API.md)** — the undocumented Claude Code usage endpoint.
 - **[CLAUDE.md](CLAUDE.md)** — working practices for this repo.
 
 ## Requirements

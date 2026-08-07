@@ -11,12 +11,12 @@
  * new file. Clicking faster than the holdoff allows is pointless, so encoder
  * events inside the interval are dropped rather than queued.
  *
- * Usage: bun run src/click.ts          # click on every dial movement
- *        bun run src/click.ts --once   # play a single click and exit
+ * Usage: bun run tools/click.ts          # click on every dial movement
+ *        bun run tools/click.ts --once   # play a single click and exit
  */
 import { BusyBar } from '@busy-app/busy-lib';
-import { listenInput } from './input';
-import { SAMPLE_RATE, pcm16 } from './snd';
+import { listenInput } from '../src/input';
+import { SAMPLE_RATE, pcm16 } from '../src/snd';
 
 const APP_NAME = 'claude_sound';
 const FILE_NAME = 'click.snd';

@@ -18,15 +18,15 @@
  * to a full loop and stack — see DEVICE.md.)
  *
  * Usage:
- *   bun run src/flame.ts [start-level]        # on device; dial changes level
- *   bun run src/flame.ts --preview [out.png]  # local contact sheet, no device
+ *   bun run tools/flame.ts [start-level]        # on device; dial changes level
+ *   bun run tools/flame.ts --preview [out.png]  # local contact sheet, no device
  *
  * Env: BUSY_BAR_ADDR, BUSY_PRIORITY
  */
 import { BusyBar } from '@busy-app/busy-lib';
-import { encodeAnim, type AnimSection } from './anim';
-import { listenInput } from './input';
-import { encodePng } from './png';
+import { encodeAnim, type AnimSection } from '../src/anim';
+import { listenInput } from '../src/input';
+import { encodePng } from '../src/png';
 
 const WIDTH = 72;
 const HEIGHT = 16;

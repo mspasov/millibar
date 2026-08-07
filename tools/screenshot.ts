@@ -1,7 +1,7 @@
 /**
  * Captures a BUSY Bar display and writes it as a scaled-up PNG.
  *
- * Usage: bun run src/screenshot.ts [out.png] [front|back] [scale]
+ * Usage: bun run tools/screenshot.ts [out.png] [front|back] [scale]
  *
  * `GET /api/screen` returns a base64-encoded **BGR888** framebuffer — the
  * OpenAPI spec claims `image/bmp` and the channel order is not RGB. Reading it
@@ -9,7 +9,7 @@
  * unnoticed (greens and greys are unaffected). The official library does the
  * same swap in Global/utils/frameData.ts:bgrToRgba.
  */
-import { encodePng } from './png';
+import { encodePng } from '../src/png';
 
 const DISPLAYS = {
   front: { index: 0, width: 72, height: 16 },

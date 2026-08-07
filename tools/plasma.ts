@@ -2,10 +2,10 @@
  * Generates a looping rainbow-plasma animation, encodes it as a `.anim` file,
  * uploads it to the BUSY Bar, and plays it on the front display.
  *
- * Usage: bun run src/plasma.ts [seconds]
+ * Usage: bun run tools/plasma.ts [seconds]
  */
 import { BusyBar } from '@busy-app/busy-lib';
-import { encodeAnim } from './anim';
+import { encodeAnim } from '../src/anim';
 
 const WIDTH = 72;
 const HEIGHT = 16;

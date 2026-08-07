@@ -6,11 +6,11 @@
  * mono, 44100 Hz (see DEVICE.md — confirmed from the firmware's
  * scripts/audio.py, which encodes with ffmpeg `-f s16le -ar 44100 -ac 1`).
  *
- * Usage: bun run src/chime.ts [note-frequencies-hz...]
- *   e.g. bun run src/chime.ts 523.25 659.25 783.99
+ * Usage: bun run tools/chime.ts [note-frequencies-hz...]
+ *   e.g. bun run tools/chime.ts 523.25 659.25 783.99
  */
 import { BusyBar } from '@busy-app/busy-lib';
-import { SAMPLE_RATE, pcm16 } from './snd';
+import { SAMPLE_RATE, pcm16 } from '../src/snd';
 
 const APP_NAME = 'claude_sound';
 const FILE_NAME = 'chime.snd';

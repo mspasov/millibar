@@ -1,8 +1,8 @@
 # Working in this repo
 
 Controls a BUSY Bar (physical LED device) from Bun/TypeScript. See [README.md](README.md)
-for what the apps do, [DEVICE.md](DEVICE.md) for hardware and HTTP API knowledge, and
-[USAGE-API.md](USAGE-API.md) for the Claude Code usage endpoint.
+for what the apps do, [DEVICE.md](docs/DEVICE.md) for hardware and HTTP API knowledge, and
+[USAGE-API.md](docs/USAGE-API.md) for the Claude Code usage endpoint.
 
 **Read DEVICE.md before writing device code.** It documents a dozen behaviours that are
 absent from — or contradicted by — the device's own OpenAPI spec, each of which cost real
@@ -43,7 +43,7 @@ So when something doesn't work, or before claiming it does:
 - **HTTP bodies** → point `BUSY_BAR_ADDR` at a local `Bun.serve()` echo server and print
   what actually arrives. Note the client does a `GET /api/version` handshake first and
   requires `api_semver` in the reply.
-- **Display output** → `bun run src/screenshot.ts`, and read the PNG. Lit-pixel counts are
+- **Display output** → `bun run tools/screenshot.ts`, and read the PNG. Lit-pixel counts are
   a quick assertion (`263` → `275` proved the three refresh dots appeared).
 - **Transient display states** → poll `/api/screen` in a tight loop and keep the frame that
   shows what you're after; a 300ms indicator is otherwise unobservable.
