@@ -117,6 +117,11 @@ device actually sustains.
   countdown while fetching and the status light fades. During cooldown a press still
   repaints (without refetching), so a blank screen is always recoverable — every button
   press ends in a repaint.
+- A failed update blinks the status light **red, once** (preempting the cyan fetch
+  fade), and the shown values dim to stale grey until a fetch succeeds.
+- The last successful usage read is cached in `~/.cache/mbar/usage.json`, so a restart
+  while the API is unreachable or rate-limited starts from the previous values — grey
+  with a `?` on the label, like any stale data — until a live fetch replaces them.
 - Draws carry a 90-second timeout, refreshed by a once-a-minute heartbeat repaint (which
   also keeps countdowns ticking), so the display **self-clears within ~90 s if the
   process dies**. Ctrl-C clears it explicitly.

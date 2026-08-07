@@ -77,17 +77,30 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
       )
   );
 
+  /** One LED pulse at a time: the red failure blink can arrive while the cyan
+   * fetch pulse is still fading, and interleaving their frames would flicker
+   * both colours. Abort the running pulse and chain the new one behind its
+   * cleanup, so the old run's final black frame cannot land mid-blink. */
+  let ledAbort: AbortController | null = null;
+  let ledChain = Promise.resolve();
+  function pulseStatusLight(color: string, shape?: { durationMs?: number; cycles?: number }): void {
+    ledAbort?.abort();
+    const abort = new AbortController();
+    ledAbort = abort;
+    const signal = AbortSignal.any([abort.signal, controller.signal]);
+    // Fire-and-forget: the fade outlasts a typical fetch and must not delay it.
+    ledChain = ledChain
+      .then(() => pulseLed({ color, ...shape, applicationName, priority, signal }))
+      .catch(() => {});
+  }
+
   modules.forEach((module, index) => {
     module.init?.({
       requestRender: () => {
         if (activeIndex === index) repaint();
       },
-      pulseActivity: (color) => {
-        if (activeIndex === index) {
-          // Fire-and-forget: the fade outlasts a typical fetch and must not
-          // delay it.
-          void pulseLed({ color, applicationName, priority, signal: controller.signal });
-        }
+      pulseActivity: (color, shape) => {
+        if (activeIndex === index) pulseStatusLight(color, shape);
       },
       log: (message) => console.log(`[${module.id}] ${message}`),
       signal: controller.signal,

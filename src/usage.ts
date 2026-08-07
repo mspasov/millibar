@@ -10,6 +10,7 @@
  * The access token stays in memory: never logged, never written to disk, never
  * passed as an argv where `ps` could read it.
  */
+import { readFileSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
 import { join } from 'node:path';
 
@@ -243,6 +244,55 @@ export async function fetchUsage(): Promise<Usage> {
 
 /** Raw body of the last fetch, for debugging shape drift in the undocumented API. */
 export let lastRawBody: unknown = null;
+
+// ---------------------------------------------------------------------------
+// Cache: the last successful read, persisted so a restart while the API is
+// down or rate-limited starts from the previous values (rendered stale)
+// instead of a blank screen.
+// ---------------------------------------------------------------------------
+
+export const USAGE_CACHE_PATH = join(homedir(), '.cache', 'mbar', 'usage.json');
+
+/** A window only counts if it would render: utilization must be a number.
+ * Guards against hand-edited or truncated cache files reaching the display
+ * as `NaN%`. */
+function cachedWindow(raw: unknown): UsageWindow | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const { utilization, resetsAt } = raw as Record<string, unknown>;
+  if (typeof utilization !== 'number' || !Number.isFinite(utilization)) return null;
+  return { utilization, resetsAt: typeof resetsAt === 'string' ? resetsAt : null };
+}
+
+/** Null when absent or corrupt — a bad cache is simply no cache. */
+export function loadCachedUsage(path = USAGE_CACHE_PATH): Usage | null {
+  let raw: any;
+  try {
+    raw = JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return null;
+  }
+  // Our own writes always carry an ISO fetchedAt; anything else is not ours.
+  const fetchedAt = new Date(raw?.fetchedAt);
+  if (!Number.isFinite(fetchedAt.getTime())) return null;
+  const models: ModelWindow[] = Array.isArray(raw?.models)
+    ? raw.models.flatMap((m: unknown) => {
+        const window = cachedWindow(m);
+        const model = (m as Record<string, unknown> | null)?.model;
+        return window && typeof model === 'string' ? [{ ...window, model }] : [];
+      })
+    : [];
+  return { fiveHour: cachedWindow(raw?.fiveHour), sevenDay: cachedWindow(raw?.sevenDay), models, fetchedAt };
+}
+
+/** Best-effort: a read-only or full disk must not break polling. Bun.write
+ * creates the ~/.cache/mbar/ directory itself. */
+export async function saveCachedUsage(usage: Usage, path = USAGE_CACHE_PATH): Promise<void> {
+  try {
+    await Bun.write(path, JSON.stringify(usage));
+  } catch {
+    // deliberately silent
+  }
+}
 
 if (import.meta.main) {
   const usage = await fetchUsage();

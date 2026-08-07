@@ -32,10 +32,12 @@ export interface RenderFrame {
 export interface ModuleContext {
   /** Ask the host to repaint; a no-op while this module is hidden. */
   requestRender(): void;
-  /** Pulse the status light. Suppressed by the host while the module is
-   * hidden: the firmware restarts the notification preset on every draw that
-   * carries a colour, so exactly one module may drive it at a time. */
-  pulseActivity(color: string): void;
+  /** Pulse the status light; `shape` overrides the default slow two-cycle
+   * fade (e.g. one short cycle for a failure blink). A new pulse preempts one
+   * still running. Suppressed by the host while the module is hidden: the
+   * firmware restarts the notification preset on every draw that carries a
+   * colour, so exactly one module may drive it at a time. */
+  pulseActivity(color: string, shape?: { durationMs?: number; cycles?: number }): void;
   /** Log a line, prefixed with the module id. */
   log(message: string): void;
   /** Host lifetime — aborted on shutdown. */

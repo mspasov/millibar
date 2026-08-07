@@ -1,8 +1,11 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { COLORS, HIDDEN } from '../display';
 import type { ModuleContext } from '../module';
-import { NoCredentialsError, RateLimitError, type Usage } from '../usage';
-import { buildViews, claudeUsageModule } from './claude-usage';
+import { loadCachedUsage, NoCredentialsError, RateLimitError, saveCachedUsage, type Usage } from '../usage';
+import { buildViews, claudeUsageModule, type ClaudeUsageOptions } from './claude-usage';
 
 const usageFixture = (over: Partial<Usage> = {}): Usage => ({
   fiveHour: { utilization: 62, resetsAt: new Date(Date.now() + 2 * 3_600_000).toISOString() },
@@ -19,14 +22,27 @@ const nullContext = (): ModuleContext => ({
   signal: new AbortController().signal,
 });
 
-function makeModule(fetchImpl: () => Promise<Usage>, sweepMs = 0) {
+const cacheDirs: string[] = [];
+function cacheDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'mbar-module-'));
+  cacheDirs.push(dir);
+  return dir;
+}
+afterEach(() => {
+  for (const dir of cacheDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+function makeModule(fetchImpl: () => Promise<Usage>, over: Partial<ClaudeUsageOptions> = {}) {
   const module = claudeUsageModule({
     pollIntervalMs: 300_000,
     refreshCooldownMs: 5_000,
-    // Instant sweeps by default so renders show settled values.
-    sweepMs,
+    // Instant sweeps by default so renders show settled values, and no cache
+    // so tests never touch the real ~/.cache.
+    sweepMs: 0,
     sweepCoolMs: 0,
+    cachePath: null,
     fetchUsageImpl: fetchImpl,
+    ...over,
   });
   module.init?.(nullContext());
   return module;
@@ -87,6 +103,31 @@ describe('poll', () => {
     const label = module.render({ refreshing: false })[0] as { text: string; color: string };
     expect(label.text).toBe('5H?');
     expect(label.color).toBe(COLORS.stale);
+  });
+
+  test('a failed update blinks the light red once, after the cyan fetch pulse', async () => {
+    const pulses: Array<{ color: string; shape?: unknown }> = [];
+    let fail = false;
+    const module = claudeUsageModule({
+      pollIntervalMs: 300_000,
+      refreshCooldownMs: 5_000,
+      sweepMs: 0,
+      sweepCoolMs: 0,
+      cachePath: null,
+      fetchUsageImpl: async () => {
+        if (fail) throw new Error('network down');
+        return usageFixture();
+      },
+    });
+    module.init?.({ ...nullContext(), pulseActivity: (color, shape) => pulses.push({ color, shape }) });
+
+    await module.poll();
+    expect(pulses).toEqual([{ color: COLORS.refresh, shape: undefined }]);
+
+    fail = true;
+    await module.poll();
+    expect(pulses[1]).toEqual({ color: COLORS.refresh, shape: undefined });
+    expect(pulses[2]).toEqual({ color: COLORS.critical, shape: { durationMs: 600, cycles: 1 } });
   });
 
   test('missing credentials are fatal', async () => {
@@ -159,6 +200,40 @@ describe('render', () => {
     expect(fill).toMatchObject({ width: Math.round((72 * 31) / 100) });
   });
 
+  test('a successful poll persists the read for the next run', async () => {
+    const path = join(cacheDir(), 'usage.json');
+    const module = makeModule(async () => usageFixture(), { cachePath: path });
+    await module.poll();
+    const cached = loadCachedUsage(path);
+    expect(cached?.fiveHour?.utilization).toBe(62);
+    expect(cached?.sevenDay?.utilization).toBe(31);
+  });
+
+  test('a restart with the API down starts from the cached read, stale until a live fetch', async () => {
+    const path = join(cacheDir(), 'usage.json');
+    await saveCachedUsage(usageFixture(), path);
+
+    let fail = true;
+    const module = makeModule(async () => {
+      if (fail) throw new Error('network down');
+      return usageFixture({ fiveHour: { utilization: 70, resetsAt: null } });
+    }, { cachePath: path });
+
+    // Before any poll: cached values render, marked stale.
+    const prePoll = module.render({ refreshing: false }) as Array<Record<string, unknown>>;
+    expect(prePoll[0]).toMatchObject({ text: '5H?', color: COLORS.stale });
+    expect(prePoll[2]).toMatchObject({ text: '62%', color: COLORS.stale });
+
+    await module.poll(); // fails — cached values stay up
+    expect((module.render({ refreshing: false })[0] as { text: string }).text).toBe('5H?');
+
+    fail = false;
+    await module.poll();
+    const fresh = module.render({ refreshing: false }) as Array<Record<string, unknown>>;
+    expect(fresh[0]).toMatchObject({ text: '5H', color: COLORS.label });
+    expect(fresh[2]).toMatchObject({ text: '70%', color: COLORS.warn });
+  });
+
   test('with a live sweep, a render right after the poll is still in flight', async () => {
     // A sweep far longer than the test: the first frame shows the start of
     // the roll up from 0% with the leading edge lit, not the settled value.
@@ -167,6 +242,7 @@ describe('render', () => {
       pollIntervalMs: 300_000,
       refreshCooldownMs: 5_000,
       sweepMs: 600_000,
+      cachePath: null,
       fetchUsageImpl: async () => usageFixture(),
     });
     module.init?.({ ...nullContext(), signal: controller.signal });

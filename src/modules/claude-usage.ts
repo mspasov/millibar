@@ -10,6 +10,10 @@
  *
  * Value changes animate (src/sweep.ts): polls, going stale, and encoder view
  * switches all sweep the bar and roll the number instead of snapping.
+ *
+ * The last successful read is persisted to ~/.cache/mbar/usage.json, so a
+ * restart while the API is unreachable or rate-limited starts from the
+ * previous values (stale-dimmed) rather than a blank screen.
  */
 import {
   COLORS,
@@ -23,7 +27,16 @@ import {
 } from '../display';
 import { PctSweep, sweepHead } from '../sweep';
 import { wrapIndex, type ModuleContext, type MonitorModule, type PollResult, type RenderFrame } from '../module';
-import { fetchUsage, NoCredentialsError, RateLimitError, type Usage, type UsageWindow } from '../usage';
+import {
+  fetchUsage,
+  loadCachedUsage,
+  NoCredentialsError,
+  RateLimitError,
+  saveCachedUsage,
+  USAGE_CACHE_PATH,
+  type Usage,
+  type UsageWindow,
+} from '../usage';
 
 const WIDTH = 72;
 const BAR_Y = 12;
@@ -47,6 +60,10 @@ const DOT_SIZE = 2;
 /** Brightness of the pace tick when it sits inside the fill, as a fraction of
  * the fill colour — dark enough to read as a notch, light enough to find. */
 const PACE_FILL_SCALE = 0.35;
+
+/** One short red blink when an update fails — preempts the cyan fetch pulse
+ * (which is otherwise still fading when a fetch fails fast). */
+const FAIL_BLINK = { durationMs: 600, cycles: 1 };
 
 interface View {
   label: string;
@@ -91,12 +108,16 @@ export interface ClaudeUsageOptions {
   /** Sweep timings, overridable so tests can run instant (0). */
   sweepMs?: number;
   sweepCoolMs?: number;
+  /** Where the last successful read is persisted so a restart under an
+   * unreachable or rate-limited API starts from the previous values instead
+   * of a blank screen. Null disables persistence (tests). */
+  cachePath?: string | null;
   /** Injectable for tests. */
   fetchUsageImpl?: typeof fetchUsage;
 }
 
 export function claudeUsageModule(options: ClaudeUsageOptions): MonitorModule {
-  const { pollIntervalMs, refreshCooldownMs, fetchUsageImpl = fetchUsage } = options;
+  const { pollIntervalMs, refreshCooldownMs, cachePath = USAGE_CACHE_PATH, fetchUsageImpl = fetchUsage } = options;
   let ctx: ModuleContext | null = null;
   let views: View[] = [];
   let viewIndex = 0;
@@ -128,6 +149,18 @@ export function claudeUsageModule(options: ClaudeUsageOptions): MonitorModule {
     init(context) {
       ctx = context;
       context.signal.addEventListener('abort', () => sweep.stop());
+      // Seed from the last run's read, marked stale (grey, '?' on the label)
+      // until the first live fetch replaces it — the startup sweep plays
+      // against the cached value instead of waiting on the network.
+      if (cachePath) {
+        const cached = loadCachedUsage(cachePath);
+        if (cached) {
+          views = buildViews(cached);
+          stale = true;
+          retarget();
+          ctx.log(`showing cached usage from ${cached.fetchedAt.toISOString()}`);
+        }
+      }
     },
 
     async poll(): Promise<PollResult> {
@@ -141,6 +174,7 @@ export function claudeUsageModule(options: ClaudeUsageOptions): MonitorModule {
         viewIndex = sameView >= 0 ? sameView : Math.min(viewIndex, Math.max(views.length - 1, 0));
         stale = false;
         retarget();
+        if (cachePath) await saveCachedUsage(usage, cachePath);
 
         const summary = views.map((v) => `${v.label} ${v.window.utilization}%`).join(' | ');
         const reset = currentView()?.window.resetsAt ?? null;
@@ -153,6 +187,7 @@ export function claudeUsageModule(options: ClaudeUsageOptions): MonitorModule {
         ctx?.log((error as Error).message);
         stale = true;
         retarget();
+        ctx?.pulseActivity(COLORS.critical, FAIL_BLINK);
         if (error instanceof RateLimitError) {
           // Hold button-triggered refreshes off for the whole back-off, not
           // just the usual cooldown, so a 429 isn't immediately provoked again.
