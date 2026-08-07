@@ -92,6 +92,15 @@ so a default-priority draw won't interrupt a focus session.
 > `DELETE /api/display/draw?application_name=…`. This bites when an element is drawn
 > conditionally: a progress bar omitted at 0% keeps showing its previous width.
 
+> **An id's element type is fixed.** Redrawing an existing id as a *different* type
+> (text → rectangle or the reverse) is rejected with `400 {"error":"Bad request"}` —
+> and the 400 is **not atomic**: elements earlier in the same request still land, so one
+> bad element half-applies a frame. Verified both directions on firmware 1.1.1. To
+> retire an element whose id won't be drawn again, re-emit it as-is with its colour
+> fields zero-alpha'd (instant), or with `timeout: 1` (works for any type, gone within
+> a second). `DisplaySession` in `src/display.ts` does this automatically for ids that
+> disappear between consecutive draws.
+
 ```sh
 # Draw scrolling green text on the front display for 20s
 curl -X POST http://10.0.4.20/api/display/draw \
@@ -310,6 +319,11 @@ Messages are protobuf-encoded `BSB_State.State` (schemas:
 | `ButtonEvent` | button `OK`/`BACK`/`START`, action `PRESS`/`RELEASE` |
 | `SwitchEvent` | position `BUSY`/`CUSTOM`/`OFF`/`APPS`/`SETTINGS` |
 | `EncoderEvent` | `delta` (sint32, zigzag-encoded) — the rotary dial |
+
+There is **no encoder-press event**: the protobuf defines exactly the three buttons
+above. A physical press of the dial must surface as one of them — assumed `OK`
+(unverified; check with `bun run src/input.ts` and press the dial; the monitor's
+`SWITCH_BUTTON` env var overrides the assumption).
 
 `bun run src/input.ts` prints these live; `src/input.ts` also exports `listenInput()` and
 `decodeInputEvents()`. It decodes only the input field and skips everything else (frames

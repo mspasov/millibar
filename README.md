@@ -1,12 +1,15 @@
-# busy
+# millibar
 
-Control a [BUSY Bar](https://busy.app/) — an open-source desk device with a 72×16 LED
+Usage pressure on a very small bar.
+
+Controls a [BUSY Bar](https://busy.app/) — an open-source desk device with a 72×16 LED
 pixel display, a rotary encoder, three buttons, a five-position mode switch, and an RGB
 status light — from TypeScript.
 
-The headline app shows your **Claude Code usage limits** on the bar: rotate the dial to
-cycle between the 5-hour, 7-day, and per-model windows; press a button to refresh, with
-the status light fading cyan while it fetches.
+The headline app is a **modular monitor**: press the dial to switch between monitor
+modules — Claude Code usage limits, CPU load, and whatever you add next — rotate it to
+cycle the views inside a module, and press `START` to refresh, with the status light
+fading cyan while it fetches.
 
 ## Setup
 
@@ -23,7 +26,7 @@ hangs or errors, see [Troubleshooting](#troubleshooting).
 | Command | What it does |
 |---|---|
 | `bun run index.ts` | Smoke test — prints device status and busy-timer state. |
-| `bun run src/monitor.ts` | **Usage monitor.** Claude Code limits on the display; dial cycles windows, button refreshes. |
+| `bun run src/monitor.ts` | **The monitor.** Switchable modules on the display: Claude Code limits and CPU load. Dial press switches modules, rotation cycles views, `START` refreshes. |
 | `bun run src/input.ts` | Prints button, switch, and encoder events live. |
 | `bun run src/led.ts pulse "#00CCFF" 1400 2` | Pulses the status light — colour, duration ms, cycles. |
 | `bun run src/led.ts fade "#F00,#0F0,#00F" 3000 hsv` | Crossfades through colour stops — stops, duration ms, `rgb`\|`hsv`. |
@@ -43,6 +46,7 @@ All via environment variables; every one has a working default.
 | `POLL_INTERVAL_MS` | `300000` (5 min) | monitor — how often the usage API is polled |
 | `REFRESH_COOLDOWN_MS` | `5000` | monitor — floor between button-triggered fetches |
 | `BUSY_PRIORITY` | `50` | monitor — draw priority, 1–100 |
+| `SWITCH_BUTTON` | `OK` | monitor — which button event the dial press reports as (`OK`\|`BACK`\|`START`) |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | usage — where credentials are read from off-macOS |
 
 ## Modules
@@ -65,9 +69,17 @@ Each is usable on its own, not just by the monitor.
 - **`src/snd.ts`** — `pcm16()` converts float samples to the device's `.snd` audio format
   (raw s16le mono 44.1 kHz).
 - **`src/screenshot.ts`** — captures a display to PNG, handling the BGR framebuffer.
-- **`src/monitor.ts`** — composes the above into the usage monitor.
+- **`src/display.ts`** — the draw transport plus `DisplaySession`, which serialises
+  draws, stamps timeouts, and scrubs elements whose ids disappear between draws (the
+  firmware otherwise leaves them on screen). Also the shared render kit: severity
+  colours, font metrics, the compact countdown, `progressBar()`.
+- **`src/module.ts`** — the `MonitorModule` contract and per-module scheduler.
+- **`src/host.ts`** — `runHost()` runs modules against one device: input routing, module
+  switching, the heartbeat repaint, status-light ownership, shutdown.
+- **`src/modules/`** — the modules themselves: `claude-usage.ts`, `cpu.ts`.
+- **`src/monitor.ts`** — the entry point that registers modules with the host.
 
-### Usage monitor behaviour
+### Monitor behaviour
 
 One window at a time: a label, a dark-grey countdown to the window's reset, a percentage,
 and a progress bar recoloured by severity (green below 50%, amber below 80%, red above).
@@ -79,18 +91,36 @@ race: fill ahead of the tick means tokens are going faster than time. Under pace
 sits in the empty track, just lighter than it; over pace it sits submerged in the fill as
 a darker notch of the severity colour.
 
-- **Rotate the encoder** to cycle `5H` → `7D` → per-model windows (e.g. `FABLE`). The list
-  is rebuilt each poll, since the API adds and drops model windows; the selection follows
-  its label rather than its index so a refresh never jumps you elsewhere.
-- **Press any button** to refresh immediately. Three cyan dots replace the countdown
-  while fetching and the status light fades. During cooldown a press still repaints (without refetching), so
-  a blank screen is always recoverable.
-- Draws carry a timeout of 1.5× the poll interval, so the display **self-clears if the
+- **Press the dial** (its press arrives as the `OK` button event — override with
+  `SWITCH_BUTTON` if your press reports differently) to switch to the next module:
+  Claude usage → CPU load → back. Each module keeps polling while hidden, so switching
+  always lands on fresh data, and each remembers which view it was on.
+- **Rotate the encoder** to cycle the active module's views — `5H` → `7D` → per-model
+  windows (e.g. `FABLE`) on Claude usage, `1M`/`5M`/`15M` load windows on CPU. The Claude
+  list is rebuilt each poll, since the API adds and drops model windows; the selection
+  follows its label rather than its index so a refresh never jumps you elsewhere.
+- **Press `START`** to refresh the active module immediately. Three cyan dots replace the
+  countdown while fetching and the status light fades. During cooldown a press still
+  repaints (without refetching), so a blank screen is always recoverable — every button
+  press ends in a repaint.
+- Draws carry a 90-second timeout, refreshed by a once-a-minute heartbeat repaint (which
+  also keeps countdowns ticking), so the display **self-clears within ~90 s if the
   process dies**. Ctrl-C clears it explicitly.
 
 Buttons keep their normal device functions too — depending on device state, `OK` and
 `START` can start a BUSY session, and `BACK` blanks the canvas. That's the device's own
 behaviour, not the monitor's.
+
+### Writing a monitor module
+
+A module is one file in `src/modules/` implementing `MonitorModule` (see
+[src/module.ts](src/module.ts)): a `poll()` that updates its data and returns its own
+cadence and refresh cooldown, a `render()` that returns the element list for its current
+state, and optionally `onEncoder()` for internal views. Register it in
+[src/monitor.ts](src/monitor.ts) and the host does the rest — id namespacing, element
+scrubbing on switch, timeouts, input routing, and status-light arbitration. A Grok-usage
+module, say, is a sibling fetch client next to `src/usage.ts` plus a factory shaped like
+[src/modules/claude-usage.ts](src/modules/claude-usage.ts); nothing else changes.
 
 ## Troubleshooting
 

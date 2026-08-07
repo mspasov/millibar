@@ -1,0 +1,248 @@
+/**
+ * Claude Code usage limits as a monitor module.
+ *
+ * Layout (72x16): window label on the left, reset countdown in dark grey and
+ * percentage on the right, and a progress bar along the bottom. A faint tick
+ * on the bar marks how much of the window has elapsed — fill ahead of the tick
+ * means tokens are going faster than time. Colour tracks severity. Rotating
+ * the encoder cycles through the available limit windows (5-hour, 7-day, and
+ * any per-model weekly windows such as Fable).
+ */
+import {
+  COLORS,
+  HIDDEN,
+  formatResetCompact,
+  progressBar,
+  scaleRgb,
+  severityColor,
+  textWidth,
+  type DrawElement,
+} from '../display';
+import { wrapIndex, type ModuleContext, type MonitorModule, type PollResult, type RenderFrame } from '../module';
+import { fetchUsage, NoCredentialsError, RateLimitError, type Usage, type UsageWindow } from '../usage';
+
+const WIDTH = 72;
+const BAR_Y = 12;
+const BAR_HEIGHT = 3;
+
+const LABEL_X = 2;
+/** `mid_right` renders its last inked column 2px left of the anchor (measured,
+ * both fonts), so anchoring at 43 puts the countdown's right edge at column 41
+ * — two clear columns before the widest percentage ("100%" starts at 44). */
+const RESET_ANCHOR_X = 43;
+const RESET_RIGHT_EDGE = RESET_ANCHOR_X - 2;
+/** Minimum dark columns between the label and the reset countdown. */
+const RESET_GAP = 2;
+
+/** Activity dots, swapped in (by alpha) for the reset countdown while
+ * fetching — right-aligned on the same column so they clear the label too. */
+const DOT_XS = [RESET_RIGHT_EDGE - 9, RESET_RIGHT_EDGE - 5, RESET_RIGHT_EDGE - 1];
+const DOT_Y = 4;
+const DOT_SIZE = 2;
+
+/** Brightness of the pace tick when it sits inside the fill, as a fraction of
+ * the fill colour — dark enough to read as a notch, light enough to find. */
+const PACE_FILL_SCALE = 0.35;
+
+interface View {
+  label: string;
+  window: UsageWindow;
+  /** Length of the usage window; its start is `resetsAt - periodMs`. */
+  periodMs: number;
+}
+
+const FIVE_HOURS_MS = 5 * 3_600_000;
+const SEVEN_DAYS_MS = 7 * 86_400_000;
+
+function formatReset(resetsAt: string | null): string {
+  if (!resetsAt) return 'no reset scheduled';
+  const ms = new Date(resetsAt).getTime() - Date.now();
+  if (!Number.isFinite(ms) || ms <= 0) return 'resetting now';
+  const hours = Math.floor(ms / 3_600_000);
+  const minutes = Math.round((ms % 3_600_000) / 60_000);
+  return hours >= 24
+    ? `resets in ${Math.floor(hours / 24)}d ${hours % 24}h`
+    : `resets in ${hours}h ${minutes}m`;
+}
+
+/** The windows available to cycle through, in a stable order. Per-model windows
+ * come and go as the API adds or drops them, so this is rebuilt on every poll. */
+export function buildViews(usage: Usage): View[] {
+  const views: View[] = [];
+  if (usage.fiveHour) views.push({ label: '5H', window: usage.fiveHour, periodMs: FIVE_HOURS_MS });
+  if (usage.sevenDay) views.push({ label: '7D', window: usage.sevenDay, periodMs: SEVEN_DAYS_MS });
+  for (const model of usage.models) {
+    // Fonts are bitmap ASCII; uppercase keeps the label visually consistent.
+    // Model-scoped limits are weekly windows, like 7D.
+    views.push({ label: model.model.toUpperCase(), window: model, periodMs: SEVEN_DAYS_MS });
+  }
+  return views;
+}
+
+export interface ClaudeUsageOptions {
+  pollIntervalMs: number;
+  /** Floor between API fetches, so holding a button can't hammer the endpoint
+   * into a 429. */
+  refreshCooldownMs: number;
+  /** Injectable for tests. */
+  fetchUsageImpl?: typeof fetchUsage;
+}
+
+export function claudeUsageModule(options: ClaudeUsageOptions): MonitorModule {
+  const { pollIntervalMs, refreshCooldownMs, fetchUsageImpl = fetchUsage } = options;
+  let ctx: ModuleContext | null = null;
+  let views: View[] = [];
+  let viewIndex = 0;
+  let stale = false;
+
+  const currentView = (): View | null => views[viewIndex] ?? null;
+
+  return {
+    id: 'claude',
+    title: 'Claude usage',
+
+    init(context) {
+      ctx = context;
+    },
+
+    async poll(): Promise<PollResult> {
+      ctx?.pulseActivity(COLORS.refresh);
+      try {
+        const usage = await fetchUsageImpl();
+        const previousLabel = currentView()?.label;
+        views = buildViews(usage);
+        // Keep showing the same window across refreshes even if the list changed.
+        const sameView = views.findIndex((v) => v.label === previousLabel);
+        viewIndex = sameView >= 0 ? sameView : Math.min(viewIndex, Math.max(views.length - 1, 0));
+        stale = false;
+
+        const summary = views.map((v) => `${v.label} ${v.window.utilization}%`).join(' | ');
+        const reset = currentView()?.window.resetsAt ?? null;
+        ctx?.log(`${summary} (${currentView()?.label}: ${formatReset(reset)})`);
+        return { nextPollMs: pollIntervalMs, holdRefreshMs: refreshCooldownMs };
+      } catch (error) {
+        if (error instanceof NoCredentialsError) throw error;
+
+        // Keep the last known values on screen, dimmed, rather than blanking.
+        ctx?.log((error as Error).message);
+        stale = true;
+        if (error instanceof RateLimitError) {
+          // Hold button-triggered refreshes off for the whole back-off, not
+          // just the usual cooldown, so a 429 isn't immediately provoked again.
+          const waitMs = Math.max(error.retryAfterSeconds * 1000, pollIntervalMs);
+          return { nextPollMs: waitMs, holdRefreshMs: waitMs };
+        }
+        return { nextPollMs: pollIntervalMs, holdRefreshMs: refreshCooldownMs };
+      }
+    },
+
+    render(frame: RenderFrame): DrawElement[] {
+      const view = currentView();
+      if (!view) return [];
+
+      const pct = Math.max(0, Math.min(100, view.window.utilization));
+      const color = stale ? COLORS.stale : severityColor(pct);
+      const dotColor = frame.refreshing ? COLORS.refresh : HIDDEN(COLORS.refresh);
+      const labelText = stale ? `${view.label}?` : view.label;
+      const labelEnd = LABEL_X + textWidth(labelText) - 1;
+      const resetText = formatResetCompact(view.window.resetsAt, RESET_RIGHT_EDGE - labelEnd - RESET_GAP);
+      // Hidden while the refresh dots occupy its spot, and when nothing fits.
+      const resetColor = resetText && !frame.refreshing ? COLORS.reset : HIDDEN(COLORS.reset);
+
+      const bar = progressBar({ pct, color, y: BAR_Y, width: WIDTH, height: BAR_HEIGHT });
+      const fillWidth = Math.max(1, Math.round((WIDTH * pct) / 100));
+
+      // Pace tick: where "now" sits in the window, so the bar reads as a race —
+      // fill ahead of the tick means tokens are going faster than time. Clamped
+      // against clock skew and already-passed resets.
+      const remainingMs = view.window.resetsAt ? new Date(view.window.resetsAt).getTime() - Date.now() : NaN;
+      const timeFraction = Math.min(1, Math.max(0, 1 - remainingMs / view.periodMs));
+      const tickX = Number.isFinite(timeFraction) ? Math.round(timeFraction * (WIDTH - 1)) : 0;
+      // Which background the tick sits on decides its shade: submerged in the fill
+      // it darkens the severity colour, over the empty track it lightens the track.
+      const tickColor = Number.isFinite(timeFraction)
+        ? pct > 0 && tickX < fillWidth
+          ? scaleRgb(color, PACE_FILL_SCALE)
+          : COLORS.pace
+        : HIDDEN(COLORS.pace);
+
+      return [
+        {
+          id: 'label',
+          type: 'text',
+          text: labelText,
+          font: 'small',
+          color: stale ? COLORS.stale : COLORS.label,
+          align: 'mid_left',
+          x: LABEL_X,
+          y: 5,
+          display: 'front',
+        },
+        {
+          id: 'reset',
+          type: 'text',
+          // Kept non-empty even when hidden: the element persists by id, and a
+          // redraw carrying the previous text under zero alpha renders nothing.
+          text: resetText || '0',
+          font: 'small',
+          color: resetColor,
+          align: 'mid_right',
+          x: RESET_ANCHOR_X,
+          y: 5,
+          display: 'front',
+        },
+        {
+          id: 'pct',
+          type: 'text',
+          text: `${Math.round(pct)}%`,
+          font: 'normal',
+          color,
+          align: 'mid_right',
+          x: WIDTH - 2,
+          y: 5,
+          display: 'front',
+        },
+        ...bar,
+        {
+          // Drawn after 'fill': later elements composite on top, and the tick
+          // must stay visible when submerged in the fill.
+          id: 'pace',
+          type: 'rectangle',
+          x: tickX,
+          y: BAR_Y,
+          width: 1,
+          height: BAR_HEIGHT,
+          radius: 0,
+          fill: 'solid',
+          fill_colors: [tickColor],
+          border_width: 0,
+          border_color: tickColor,
+          display: 'front',
+        },
+        ...DOT_XS.map((x, i) => ({
+          id: `dot${i}`,
+          type: 'rectangle' as const,
+          x,
+          y: DOT_Y,
+          width: DOT_SIZE,
+          height: DOT_SIZE,
+          radius: 0,
+          fill: 'solid' as const,
+          fill_colors: [dotColor],
+          border_width: 0,
+          border_color: dotColor,
+          display: 'front' as const,
+        })),
+      ];
+    },
+
+    onEncoder(delta) {
+      if (views.length < 2) return;
+      viewIndex = wrapIndex(viewIndex, delta, views.length);
+      const view = currentView();
+      if (view) {
+        ctx?.log(`-> ${view.label} ${view.window.utilization}% (${formatReset(view.window.resetsAt)})`);
+      }
+    },
+  };
+}
