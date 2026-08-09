@@ -52,10 +52,6 @@ const MARKER_WIDTH = 2;
  * enough that the selected row reads first, bright enough to judge level and
  * severity at a glance. */
 const UNSELECTED_SCALE = 0.45;
-/** Stale grey is already dim: the standard dim would land it at #262626, a
- * 6/255-per-channel step off the #202020 track — invisible on the LEDs. Stale
- * rows dim less (#444444), still clearly under the selected row's #555555. */
-const UNSELECTED_STALE_SCALE = 0.8;
 
 /** Same countdown geometry as the gauge module (see the comment there on the
  * mid_right anchor). */
@@ -137,15 +133,18 @@ export function claudeDashModule(options: LimitModuleOptions): MonitorModule {
   const currentScreen = (): Screen | null => poller.screens[screenIndex] ?? null;
 
   /** Point both animations at the selected screen's value; staleness rides the
-   * colour, so going stale fades to grey in place instead of snapping. */
+   * colour, so going stale fades to grey in place instead of snapping. The bar
+   * greys to staleBar, not the text's stale grey: on the bar row it must clear
+   * the dimmed rows and the pace tick (the ladder in COLORS). */
   const retarget = ({ snapBar = false }: { snapBar?: boolean } = {}): void => {
     const screen = currentScreen();
     if (!screen) return;
     const pct = Math.max(0, Math.min(100, screen.window.utilization));
-    const color = poller.stale ? COLORS.stale : severityColor(pct);
-    textSweep.to(pct, color);
-    if (snapBar) barSweep.set(pct, color);
-    else barSweep.to(pct, color);
+    const severity = severityColor(pct);
+    textSweep.to(pct, poller.stale ? COLORS.stale : severity);
+    const barColor = poller.stale ? COLORS.staleBar : severity;
+    if (snapBar) barSweep.set(pct, barColor);
+    else barSweep.to(pct, barColor);
   };
 
   return {
@@ -195,10 +194,13 @@ export function claudeDashModule(options: LimitModuleOptions): MonitorModule {
         // value: selection changes snap it (see retarget). The rest sit at
         // their last-polled values, dimmed.
         const rowPct = selected ? barShown.pct : Math.max(0, Math.min(100, v.window.utilization));
+        // Stale rows take fixed ladder greys instead of a dim: scaling the
+        // already-grey stale colour lands between the track and the pace tick,
+        // where dark greys stop separating (see COLORS.staleBar).
         const rowColor = selected
           ? barShown.color
           : poller.stale
-            ? scaleRgb(COLORS.stale, UNSELECTED_STALE_SCALE)
+            ? COLORS.staleBarDim
             : scaleRgb(severityColor(rowPct), UNSELECTED_SCALE);
         const rowBar = { x: STRIP_X, y: slot.y, width: STRIP_WIDTH, height: slot.height };
         bars.push(

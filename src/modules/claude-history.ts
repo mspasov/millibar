@@ -95,8 +95,13 @@ export function modelFamily(model: string): string {
 }
 
 /** Heatmap brightness ramp for percentile buckets 1-4. Alpha can't dim LEDs,
- * so the steps scale the components (see scaleRgb). */
-export const HEAT_COLORS = [0.18, 0.38, 0.65, 1].map((f) => scaleRgb('#FF9500FF', f));
+ * so the steps scale the components (see scaleRgb). The bottom step is 0.25:
+ * at 0.18 a bucket-1 cell (#2E1B00) sat within a few counts of the #202020
+ * idle cell on every channel — the dark-grey legibility trap (DEVICE.md).
+ * 0.25 puts its red channel 32/255 above the idle grey and ~33/255 below
+ * bucket 2. Computed against the documented floor, not yet eyeballed
+ * on-device. */
+export const HEAT_COLORS = [0.25, 0.38, 0.65, 1].map((f) => scaleRgb('#FF9500FF', f));
 /** An in-range day with zero tokens — dark like the bar screens' track, and
  * distinct from unpainted (black) cells outside the data's range. */
 export const HEAT_ZERO = COLORS.track;

@@ -179,11 +179,15 @@ monitor's reset countdown between a variable-width label and the percentage.
 
 Nearby dark greys do not separate on the panel: a `#262626` fill on the `#202020` bar
 track — 6/255 per channel apart — is invisible (observed 2026-08-09, when a 45% dim of
-stale-grey `#555555` made the dashboard's unselected bars vanish). Give
-deliberately-dark elements roughly 24/255 (`0x18`) per channel of contrast;
-`#202020` track → `#444444` dimmed fill → `#555555` full stale grey is a working
-hierarchy, and `#404040` is about the floor for "just lighter than the track". Alpha
-can't compensate — it doesn't dim pixels, brightness lives in the channel values.
+stale-grey `#555555` made the dashboard's unselected bars vanish). The `#404040` pace
+tick over that track — 32/255 apart — reads clearly in daily use. Those two points are
+the only on-device observations; the working rule extrapolated from them is to give
+deliberately-dark elements roughly 24/255 (`0x18`) per channel of contrast, and to
+check that against *every* shade the element can sit next to, not just the one being
+tuned against — the first fix for the vanishing bars cleared the track by 36/255 while
+landing 4/255 from the pace tick it abuts (caught in review, not on the device; the
+dashboard now steps its stale greys `0x20` → `0x40` → `0x58` → `0x70`). Alpha can't
+compensate — it doesn't dim pixels, brightness lives in the channel values.
 
 ### Animations (`.anim` format)
 

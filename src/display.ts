@@ -65,6 +65,15 @@ export const COLORS = {
   refresh: '#00CCFFFF',
   /** Pace tick over the empty track — just lighter than the #202020 track. */
   pace: '#404040FF',
+  /** Stale bar fills. With the fills grey, everything on a bar row is grey, so
+   * every pair that can abut must clear the panel's dark-grey legibility floor
+   * (~24/255 per channel, DEVICE.md). These four form that ladder:
+   * track 0x20 → pace 0x40 → staleBarDim 0x58 → staleBar 0x70. A shade tuned
+   * against only one neighbour lands on another — the first stale fix cleared
+   * the track and sat 4/255 from the pace tick. `stale` (0x55) is inside a
+   * ladder gap: text and markers only, never on a bar row. */
+  staleBar: '#707070FF',
+  staleBarDim: '#585858FF',
 } as const;
 
 /** Elements persist by id until cleared or their timeout expires — a redraw

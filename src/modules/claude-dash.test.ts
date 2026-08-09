@@ -135,7 +135,7 @@ describe('render', () => {
     expect(els.marker).toMatchObject({ y: 13 }); // second of two rows now
   });
 
-  test('going stale dims every row to grey', async () => {
+  test('going stale greys every row on the ladder', async () => {
     let fail = false;
     const module = makeModule(async () => {
       if (fail) throw new Error('network down');
@@ -146,17 +146,19 @@ describe('render', () => {
     await module.poll();
     const els = byId(module);
     expect(els.label).toMatchObject({ text: '5H?', color: COLORS.stale });
-    expect(els.w0fill).toMatchObject({ fill_colors: [COLORS.stale] });
-    expect(els.w1fill).toMatchObject({ fill_colors: [scaleRgb(COLORS.stale, 0.8)] });
+    expect(els.w0fill).toMatchObject({ fill_colors: [COLORS.staleBar] });
+    expect(els.w1fill).toMatchObject({ fill_colors: [COLORS.staleBarDim] });
     expect(els.marker).toMatchObject({ fill_colors: [COLORS.stale] });
 
-    // Unselected stale fills must stay clearly above the #202020 track: the
-    // standard 45% dim sank them to #262626 — 6/255 per channel off the track,
-    // invisible on the LEDs.
-    const fill = (els.w1fill as { fill_colors: string[] }).fill_colors[0]!;
-    const channel = parseInt(fill.slice(1, 3), 16);
-    const track = parseInt(COLORS.track.slice(1, 3), 16);
-    expect(channel).toBeGreaterThanOrEqual(track + 24);
+    // Everything on a stale bar row is grey, so each ladder-adjacent pair must
+    // clear the panel's ~24/255-per-channel legibility floor (DEVICE.md) —
+    // checking a single pairing is how the first stale tune stayed clear of
+    // the track while landing 4/255 from the pace tick.
+    const level = (color: string) => parseInt(color.slice(1, 3), 16);
+    const ladder = [COLORS.track, COLORS.pace, COLORS.staleBarDim, COLORS.staleBar].map(level);
+    for (let i = 1; i < ladder.length; i++) {
+      expect(ladder[i]! - ladder[i - 1]!).toBeGreaterThanOrEqual(24);
+    }
   });
 });
 
