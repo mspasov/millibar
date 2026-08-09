@@ -52,6 +52,10 @@ const MARKER_WIDTH = 2;
  * enough that the selected row reads first, bright enough to judge level and
  * severity at a glance. */
 const UNSELECTED_SCALE = 0.45;
+/** Stale grey is already dim: the standard dim would land it at #262626, a
+ * 6/255-per-channel step off the #202020 track — invisible on the LEDs. Stale
+ * rows dim less (#444444), still clearly under the selected row's #555555. */
+const UNSELECTED_STALE_SCALE = 0.8;
 
 /** Same countdown geometry as the gauge module (see the comment there on the
  * mid_right anchor). */
@@ -193,7 +197,9 @@ export function claudeDashModule(options: LimitModuleOptions): MonitorModule {
         const rowPct = selected ? barShown.pct : Math.max(0, Math.min(100, v.window.utilization));
         const rowColor = selected
           ? barShown.color
-          : scaleRgb(poller.stale ? COLORS.stale : severityColor(rowPct), UNSELECTED_SCALE);
+          : poller.stale
+            ? scaleRgb(COLORS.stale, UNSELECTED_STALE_SCALE)
+            : scaleRgb(severityColor(rowPct), UNSELECTED_SCALE);
         const rowBar = { x: STRIP_X, y: slot.y, width: STRIP_WIDTH, height: slot.height };
         bars.push(
           ...progressBar({ pct: rowPct, color: rowColor, idPrefix: `w${i}`, ...rowBar }),

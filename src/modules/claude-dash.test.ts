@@ -147,8 +147,16 @@ describe('render', () => {
     const els = byId(module);
     expect(els.label).toMatchObject({ text: '5H?', color: COLORS.stale });
     expect(els.w0fill).toMatchObject({ fill_colors: [COLORS.stale] });
-    expect(els.w1fill).toMatchObject({ fill_colors: [scaleRgb(COLORS.stale, 0.45)] });
+    expect(els.w1fill).toMatchObject({ fill_colors: [scaleRgb(COLORS.stale, 0.8)] });
     expect(els.marker).toMatchObject({ fill_colors: [COLORS.stale] });
+
+    // Unselected stale fills must stay clearly above the #202020 track: the
+    // standard 45% dim sank them to #262626 — 6/255 per channel off the track,
+    // invisible on the LEDs.
+    const fill = (els.w1fill as { fill_colors: string[] }).fill_colors[0]!;
+    const channel = parseInt(fill.slice(1, 3), 16);
+    const track = parseInt(COLORS.track.slice(1, 3), 16);
+    expect(channel).toBeGreaterThanOrEqual(track + 24);
   });
 });
 

@@ -175,6 +175,16 @@ widths, measured from `/api/screen` readbacks (firmware 1.1.1):
 `src/display.ts` embeds the small-font table (`textWidth()`), used to right-fit the
 monitor's reset countdown between a variable-width label and the percentage.
 
+#### Dark-grey legibility
+
+Nearby dark greys do not separate on the panel: a `#262626` fill on the `#202020` bar
+track — 6/255 per channel apart — is invisible (observed 2026-08-09, when a 45% dim of
+stale-grey `#555555` made the dashboard's unselected bars vanish). Give
+deliberately-dark elements roughly 24/255 (`0x18`) per channel of contrast;
+`#202020` track → `#444444` dimmed fill → `#555555` full stale grey is a working
+hierarchy, and `#404040` is about the floor for "just lighter than the track". Alpha
+can't compensate — it doesn't dim pixels, brightness lives in the channel values.
+
 ### Animations (`.anim` format)
 
 The firmware is open source ([busy-app/busybar-firmware](https://github.com/busy-app/busybar-firmware))
