@@ -5,16 +5,18 @@
  * Interaction: pressing the dial (a button event — there is no dedicated
  * encoder-press; see DEVICE.md) cycles to the next module, START refreshes
  * the active module, rotating the encoder is forwarded to the active module,
- * and every button press ends in a repaint so a screen blanked by BACK (or
- * overdrawn by another app) is always recoverable.
+ * and BACK twice within 5 s quits (the first press paints a confirm prompt).
+ * Every press still ends in a draw, so a screen blanked by BACK or overdrawn
+ * by another app is always recoverable.
  */
 import { envNumber } from './config';
 import { describeConnection, resolveConnection } from './connection';
-import { DisplaySession } from './display';
+import { DisplaySession, type DrawElement } from './display';
 import { listenInput, type Button, type InputEvent } from './input';
 import { pulseLed, type PulseShape } from './led';
 import { log, logError, logResolved } from './log';
 import { ModuleRunner, wrapIndex, type MonitorModule } from './module';
+import { QuitConfirm, TURN_OFF_MS, ensureTurnOffAsset, turnOffElement } from './quit-confirm';
 
 const BUTTONS: readonly Button[] = ['OK', 'BACK', 'START'];
 
@@ -35,6 +37,9 @@ export interface HostOptions {
   heartbeatMs?: number;
   /** Which button the dial press reports as. */
   switchButton?: Button;
+  /** false stills the quit-confirm drain and skips the turn-off farewell
+   * (mbar's ANIMATIONS switch). */
+  animations?: boolean;
 }
 
 function envSwitchButton(): Button | undefined {
@@ -64,12 +69,7 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
   let activeIndex = 0;
   const active = () => runners[activeIndex]!;
 
-  function repaint(): void {
-    const runner = active();
-    const module = runner.module;
-    const elements = module
-      .render({ refreshing: runner.refreshing })
-      .map((el) => ({ ...el, id: `${module.id}.${el.id}` }));
+  function drawFrame(elements: DrawElement[]): void {
     void session.draw(elements).then(
       // A success closes any open draw incident — during a device outage the
       // heartbeat fails once a minute, and the recovery line is the only
@@ -78,6 +78,25 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
       (e) => logError('draw', (e as Error).message)
     );
   }
+
+  function repaint(): void {
+    // The quit prompt owns the screen while armed: a poll finishing (or the
+    // heartbeat firing) mid-window must not overdraw it. Expiry repaints
+    // after disarming, so the suppression cannot outlive the window.
+    if (quit.armed) return;
+    const runner = active();
+    const module = runner.module;
+    const elements = module
+      .render({ refreshing: runner.refreshing })
+      .map((el) => ({ ...el, id: `${module.id}.${el.id}` }));
+    drawFrame(elements);
+  }
+
+  const quit = new QuitConfirm({
+    draw: drawFrame,
+    onExpire: () => repaint(),
+    animate: options.animations ?? true,
+  });
 
   const runners = modules.map(
     (module) =>
@@ -128,7 +147,7 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
     'host',
     `millibar: ${modules.map((m) => m.title).join(', ')} via ${conn ? describeConnection(conn) : 'no reachable route yet — still probing'} — ` +
       `press ${switchButton} (the dial) for the next module, START to refresh, ` +
-      'rotate the encoder to cycle screens (Ctrl-C to stop and clear)'
+      'rotate the encoder to cycle screens, BACK twice to quit (or Ctrl-C)'
   );
 
   modules.forEach((module, index) => {
@@ -150,20 +169,36 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
     if (event.type === 'button') {
       // RELEASE would fire a second time for the same press.
       if (event.action !== 'PRESS') return;
+      if (event.button === 'BACK' && quit.armed) {
+        log('host', 'BACK pressed twice — quitting');
+        shutdown(true);
+        return;
+      }
+      // Any other press dismisses an open prompt and then acts normally. The
+      // restore repaint comes first because the action's own repaint can be
+      // deferred (START with a refresh already in flight repaints only when
+      // that refresh ends).
+      if (quit.disarm()) repaint();
       if (event.button === switchButton && modules.length > 1) {
         activeIndex = wrapIndex(activeIndex, 1, modules.length);
         log('host', `-> ${active().module.title}`);
         repaint();
       } else if (event.button === 'START') {
         active().requestRefresh('START pressed');
+      } else if (event.button === 'BACK') {
+        // Unreachable when SWITCH_BUTTON=BACK claims the button above — the
+        // remap keeps module cycling and gives up on-device quitting.
+        quit.arm();
       } else {
         // Repaint on any other press: recovers a screen blanked by BACK or
-        // overdrawn by another app.
+        // overdrawn by another app. (BACK itself recovers too — the prompt is
+        // a draw, and its expiry repaints the module.)
         repaint();
       }
       return;
     }
     if (event.type !== 'encoder' || event.delta === 0) return;
+    quit.disarm();
     active().module.onEncoder?.(event.delta);
     repaint();
   }
@@ -174,19 +209,45 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
   const heartbeat = setInterval(() => {
     if (!active().refreshing) repaint();
   }, heartbeatMs);
-  controller.signal.addEventListener('abort', () => clearInterval(heartbeat));
+  controller.signal.addEventListener('abort', () => {
+    clearInterval(heartbeat);
+    // Also stops the quit ticker: a drain frame drawn after the shutdown
+    // clear would re-register the application on the device.
+    quit.disarm();
+  });
+
+  // Synced in the background at startup so a quit can play it immediately;
+  // resolves false (with a log line) when it can't be readied. Skipped
+  // entirely with animations off — the quit is then as still as the sweeps.
+  const farewellReady: Promise<boolean> =
+    (options.animations ?? true)
+      ? ensureTurnOffAsset(applicationName, (message) => log('host', message))
+      : Promise.resolve(false);
+
+  /** Clean exit shared by SIGINT/SIGTERM and the double-BACK quit. The
+   * latter passes `farewell` to play the firmware's turn-off animation
+   * first, so quitting from the device reads as the device powering down;
+   * Ctrl-C at the terminal stays instant. */
+  function shutdown(farewell = false): void {
+    controller.abort();
+    void (async () => {
+      if (farewell && (await farewellReady)) {
+        // One non-looping pass; the sleep holds its final frame briefly.
+        // Failures fall through to the clear — never block the exit.
+        await session.draw([turnOffElement()]).catch(() => {});
+        await Bun.sleep(TURN_OFF_MS + 150);
+      }
+      // Drain the LED chain before clearing: an aborted pulse still sends
+      // its light-off frame, and a draw landing after the clear would
+      // re-register the application on the device.
+      await ledChain.catch(() => {});
+      await session.clear().catch(() => {});
+      process.exit(0);
+    })();
+  }
 
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-    process.on(signal, () => {
-      controller.abort();
-      // Drain the LED chain first: an aborted pulse still sends its light-off
-      // frame, and that draw must land before the clear — after it, it would
-      // re-register the application on the device.
-      void ledChain
-        .then(() => session.clear())
-        .catch(() => {})
-        .finally(() => process.exit(0));
-    });
+    process.on(signal, () => shutdown());
   }
 
   try {

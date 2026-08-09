@@ -2,8 +2,9 @@
 /**
  * millibar — switchable monitor modules on the BUSY Bar front display.
  * Pressing the dial cycles modules (Claude gauge/dashboard/history, CPU
- * load), START refreshes the active one, and rotating the encoder cycles
- * the screens inside a module (limit windows, load windows).
+ * load), START refreshes the active one, rotating the encoder cycles the
+ * screens inside a module (limit windows, load windows), and BACK twice
+ * within 5 s quits from the device.
  *
  * The moving parts live elsewhere: src/host.ts runs the modules and owns the
  * device, src/module.ts defines what a module is, src/modules/* are the
@@ -17,7 +18,8 @@
  * Env:   BUSY_BAR_ADDR, BUSY_BAR_ROUTE, BUSY_BAR_TOKEN, BUSY_BAR_PASSWORD,
  *        MBAR_CONFIG, BUSY_PRIORITY, POLL_INTERVAL_MS, REFRESH_COOLDOWN_MS,
  *        SWITCH_BUTTON (which button the dial press reports as; default OK),
- *        ANIMATIONS (off disables the sweeps and the history intros)
+ *        ANIMATIONS (off disables the sweeps, the history intros, and
+ *        the quit prompt's drain and turn-off farewell)
  */
 import { envFlag, envNumber } from './config';
 import { isDeviceCommand, mbarUsage, runDeviceCommand } from './device-cli';
@@ -79,8 +81,9 @@ const REFRESH_COOLDOWN_MS = envNumber('REFRESH_COOLDOWN_MS', 5000, 0);
 
 // ANIMATIONS=off stills everything that moves: the value sweeps collapse to
 // snaps (a zero-length sweep is PctSweep's documented off switch, exercised
-// by every module test) and the history screens draw their static sections
-// without the appearance intros.
+// by every module test), the history screens draw their static sections
+// without the appearance intros, and the quit prompt neither drains its bar
+// nor plays the turn-off farewell.
 const ANIMATIONS = envFlag('ANIMATIONS', true);
 const sweepOptions = ANIMATIONS ? {} : { sweepMs: 0, sweepCoolMs: 0 };
 
@@ -97,9 +100,12 @@ const usageOptions = {
   ...sweepOptions,
 };
 
-await runHost([
-  claudeGaugeModule(usageOptions),
-  claudeDashModule({ ...usageOptions, quiet: true }),
-  claudeHistoryModule({ intros: ANIMATIONS }),
-  cpuModule(sweepOptions),
-]);
+await runHost(
+  [
+    claudeGaugeModule(usageOptions),
+    claudeDashModule({ ...usageOptions, quiet: true }),
+    claudeHistoryModule({ intros: ANIMATIONS }),
+    cpuModule(sweepOptions),
+  ],
+  { animations: ANIMATIONS }
+);

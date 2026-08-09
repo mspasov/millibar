@@ -249,6 +249,16 @@ Playback: upload with `POST /api/assets/upload?application_name=<app>&file=<name
 same `application_name`. Stock animations live in `/ext/apps_assets/shared/animations/`
 (e.g. `coding_72x16.anim`) and play via `stock_path: "shared/coding_72x16.anim"`.
 
+> **`stock_path` resolves only within `shared/`.** Other `apps_assets` directories are
+> unreachable: `soft_off/turn_off_72x16.anim` (the natural reading of the `shared/` form,
+> for a file that exists at `/ext/apps_assets/soft_off/animations/turn_off_72x16.anim`)
+> and the traversals `shared/../../soft_off/animations/…` / `../soft_off/…` all draw the
+> missing-asset placeholder — a magenta box with an X, top-left, 41 lit pixels — and the
+> draw still returns 200. Probed on firmware 1.1.1 (2026-08-09). To play a non-shared
+> firmware asset, copy it into your own app via `/api/storage/read` + `/api/assets/upload`
+> (there is no on-device copy) — this is how the monitor plays the soft-off app's
+> turn-off animation as its quit farewell (`src/quit-confirm.ts`).
+
 **Sections are switchable live.** The animation element takes a `section` name;
 `loop: true` loops just that section, and redrawing the same element id with a
 different `section` switches with no black frame and no re-upload. One
