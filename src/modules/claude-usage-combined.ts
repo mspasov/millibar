@@ -9,7 +9,10 @@
  * weekly windows such as Fable). The selected row runs at full brightness
  * behind a marker at the left edge; the other rows are dimmed. Every bar
  * keeps its own pace tick, so the three races stay readable at a glance.
- * Rotating the encoder moves the selection; the detail row follows.
+ * Rotating the encoder moves the selection; the detail row follows — the
+ * number rolls to the new window's value, but the bars stay put: with every
+ * window on screen at once, a bar animating from another window's value
+ * would misreport both windows mid-sweep.
  *
  * Fetching, staleness, back-off, and caching live in the shared UsagePoller;
  * mbar.ts hands both usage modules one deduplicated fetcher so the pair costs
@@ -95,12 +98,24 @@ export function claudeUsageCombinedModule(options: UsageModuleOptions): MonitorM
   let ctx: ModuleContext | null = null;
   let viewIndex = 0;
 
-  const sweep = new PctSweep({
+  /** Two animations with different rules. The number (and its colour) rolls
+   * on every change, selection moves included — motion in the readout says
+   * "now showing a different window". The selected bar may only animate
+   * within its own window (polls, going stale): every bar is on screen at
+   * once, so one sweeping from another window's value would misreport both
+   * windows mid-animation. Selection changes snap it instead. */
+  const textSweep = new PctSweep({
     durationMs: options.sweepMs,
     coolMs: options.sweepCoolMs,
     onFrame: () => ctx?.requestRender(),
   });
-  sweep.set(0, severityColor(0));
+  textSweep.set(0, severityColor(0));
+  const barSweep = new PctSweep({
+    durationMs: options.sweepMs,
+    coolMs: options.sweepCoolMs,
+    onFrame: () => ctx?.requestRender(),
+  });
+  barSweep.set(0, severityColor(0));
 
   const poller = new UsagePoller(options, (previousViews) => {
     // Keep the selection on the same window across refreshes even if the
@@ -108,18 +123,25 @@ export function claudeUsageCombinedModule(options: UsageModuleOptions): MonitorM
     const previousLabel = previousViews[viewIndex]?.label;
     const sameView = poller.views.findIndex((v) => v.label === previousLabel);
     viewIndex = sameView >= 0 ? sameView : Math.min(viewIndex, Math.max(poller.views.length - 1, 0));
-    retarget();
+    // A vanished window drops the selection onto a different one — snap the
+    // bar, as for an encoder move. The very first data (no previous views)
+    // sweeps: that's the startup reveal rising from 0, not another window's
+    // value.
+    retarget({ snapBar: previousViews.length > 0 && sameView < 0 });
   });
 
   const currentView = (): View | null => poller.views[viewIndex] ?? null;
 
-  /** Point the sweep at the selected view's value; staleness rides the
+  /** Point both animations at the selected view's value; staleness rides the
    * colour, so going stale fades to grey in place instead of snapping. */
-  const retarget = (): void => {
+  const retarget = ({ snapBar = false }: { snapBar?: boolean } = {}): void => {
     const view = currentView();
     if (!view) return;
     const pct = Math.max(0, Math.min(100, view.window.utilization));
-    sweep.to(pct, poller.stale ? COLORS.stale : severityColor(pct));
+    const color = poller.stale ? COLORS.stale : severityColor(pct);
+    textSweep.to(pct, color);
+    if (snapBar) barSweep.set(pct, color);
+    else barSweep.to(pct, color);
   };
 
   return {
@@ -128,7 +150,10 @@ export function claudeUsageCombinedModule(options: UsageModuleOptions): MonitorM
 
     init(context) {
       ctx = context;
-      context.signal.addEventListener('abort', () => sweep.stop());
+      context.signal.addEventListener('abort', () => {
+        textSweep.stop();
+        barSweep.stop();
+      });
       poller.init(context);
     },
 
@@ -139,9 +164,10 @@ export function claudeUsageCombinedModule(options: UsageModuleOptions): MonitorM
       if (!view) return [];
 
       // The animated view of the data: pct is fractional mid-sweep, colour is
-      // mid-lerp. retarget() keeps the tween pointed at the selected view.
-      const shown = sweep.current();
+      // mid-lerp. retarget() keeps both tweens pointed at the selected view.
+      const shown = textSweep.current();
       const { pct, color } = shown;
+      const barShown = barSweep.current();
       const dotColor = frame.refreshing ? COLORS.refresh : HIDDEN(COLORS.refresh);
       const labelText = poller.stale ? `${view.label}?` : view.label;
       const labelEnd = LABEL_X + textWidth(labelText) - 1;
@@ -160,14 +186,13 @@ export function claudeUsageCombinedModule(options: UsageModuleOptions): MonitorM
         const slot = slots[i];
         if (!slot) return;
         const selected = i === viewIndex;
-        // The selected bar renders the sweep's animated value so it, the
-        // number, and the colour move together — an encoder switch sweeps the
-        // newly selected row from the previous window's value, like the
-        // per-window module's single bar. The rest sit at their last-polled
-        // values, dimmed.
-        const rowPct = selected ? pct : Math.max(0, Math.min(100, v.window.utilization));
+        // The selected bar renders its own animation, so a poll's value change
+        // and the stale fade still glide — but it never wears another window's
+        // value: selection changes snap it (see retarget). The rest sit at
+        // their last-polled values, dimmed.
+        const rowPct = selected ? barShown.pct : Math.max(0, Math.min(100, v.window.utilization));
         const rowColor = selected
-          ? color
+          ? barShown.color
           : scaleRgb(poller.stale ? COLORS.stale : severityColor(rowPct), UNSELECTED_SCALE);
         const rowBar = { x: STRIP_X, y: slot.y, width: STRIP_WIDTH, height: slot.height };
         bars.push(
@@ -227,8 +252,9 @@ export function claudeUsageCombinedModule(options: UsageModuleOptions): MonitorM
           border_color: markerColor,
           display: 'front',
         },
-        // After the selected row's tick: a sweeping head passes over it.
-        sweepHead(shown, { x: STRIP_X, y: selectedSlot.y, height: selectedSlot.height, width: STRIP_WIDTH }),
+        // After the selected row's tick: a sweeping head passes over it. Rides
+        // the bar's animation, so a selection snap shows no head.
+        sweepHead(barShown, { x: STRIP_X, y: selectedSlot.y, height: selectedSlot.height, width: STRIP_WIDTH }),
         ...DOT_XS.map((x, i) => ({
           id: `dot${i}`,
           type: 'rectangle' as const,
@@ -249,9 +275,10 @@ export function claudeUsageCombinedModule(options: UsageModuleOptions): MonitorM
     onEncoder(delta) {
       if (poller.views.length < 2) return;
       viewIndex = wrapIndex(viewIndex, delta, poller.views.length);
-      // The label and countdown switch instantly; the marker jumps and the
-      // newly selected bar sweeps from the previous window's value.
-      retarget();
+      // The label and countdown switch instantly, the marker jumps, and the
+      // number rolls to the new window's value. The bar snaps: each row keeps
+      // showing its own window's truth.
+      retarget({ snapBar: true });
       const view = currentView();
       if (view) {
         ctx?.log(`-> ${view.label} ${view.window.utilization}% (${formatReset(view.window.resetsAt)})`);

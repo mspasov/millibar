@@ -86,6 +86,34 @@ describe('render', () => {
     expect(els.head).toMatchObject({ y: 14 });
   });
 
+  test('an encoder switch snaps the new bar to its own value while the number rolls', async () => {
+    // Real sweep duration, long enough that nothing lands mid-test: any
+    // animated value is still ~at its starting point when asserted.
+    const controller = new AbortController();
+    const module = makeModule(
+      async () => usageFixture(),
+      { sweepMs: 60_000, sweepCoolMs: 160 },
+      { signal: controller.signal }
+    );
+    try {
+      await module.poll();
+      module.onEncoder!(2); // 5H -> FABLE (84%, critical)
+      const els = byId(module);
+      // The bar wears FABLE's own value and colour immediately — before the
+      // fix it rendered the shared sweep, still down near the previous
+      // window's position, and crawled up from there.
+      expect(els.w2fill).toMatchObject({ width: 58, fill_colors: [COLORS.critical] }); // 84% of 69px
+      // A snap is not a sweep: no head riding the selected row.
+      expect(els.head).toMatchObject({ fill_colors: [HIDDEN('#FFFFFFFF')] });
+      // The readout does roll — mid-flight, so not FABLE's value yet.
+      expect((els.pct as { text: string }).text).not.toBe('84%');
+      // The deselected row sits at its own last-polled value, dimmed.
+      expect(els.w0fill).toMatchObject({ width: 43, fill_colors: [scaleRgb(COLORS.warn, 0.45)] }); // 62% of 69px
+    } finally {
+      controller.abort(); // stops the 60s sweep tickers
+    }
+  });
+
   test('a lone window keeps a chunky bar and hides the marker', async () => {
     const module = makeModule(async () => usageFixture({ sevenDay: null, models: [] }));
     await module.poll();
