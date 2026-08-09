@@ -22,6 +22,8 @@
  * `generate` overwrites docs/img/*.png with the curated showcase set.
  */
 import { inflateSync } from 'node:zlib';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { encodePng } from '../src/png';
 import type { ModuleContext, MonitorModule } from '../src/module';
@@ -29,7 +31,7 @@ import { claudeGaugeModule } from '../src/modules/claude-gauge';
 import { claudeDashModule } from '../src/modules/claude-dash';
 import { grokGaugeModule } from '../src/modules/grok-gauge';
 import { cpuModule } from '../src/modules/cpu';
-import { paintBars, paintHeatmap, windowDays, SCREENS } from '../src/modules/claude-history';
+import { claudeHistoryModule, paintBars, paintHeatmap, windowDays, SCREENS } from '../src/modules/claude-history';
 import type { DayTokens } from '../src/stats';
 import type { Usage } from '../src/usage';
 import type { GrokWeeklyUsage } from '../src/grok-usage';
@@ -226,8 +228,9 @@ function anchor(x: number, y: number, w: number, h: number, align: string): { x0
  * firmware: `small`/`normal` text (LVGL label placement: glyph top =
  * box_top + (line_height - base_line) - box_h - ofs_y, advances FP4-rounded,
  * letter_space 0) and solid radius-0 rectangles, alpha src-over on black. */
-export function rasterize(elements: unknown[], fonts: Record<string, Font>): Uint8Array {
+export function rasterize(elements: unknown[], fonts: Record<string, Font>, base?: Uint8Array): Uint8Array {
   const frame = new Uint8Array(W * H * 3);
+  if (base) frame.set(base);
   const blend = (x: number, y: number, c: Rgba): void => {
     if (x < 0 || x >= W || y < 0 || y >= H || c.a <= 0) return;
     const o = (y * W + x) * 3;
@@ -239,6 +242,13 @@ export function rasterize(elements: unknown[], fonts: Record<string, Font>): Uin
   for (const raw of elements) {
     const el = raw as Record<string, any>;
     if (el.display === 'back') continue;
+    if (el.type === 'animation') {
+      // The history chart: its content is the painted frame passed as `base`
+      // (the module bakes paintBars/paintHeatmap output into the asset), so
+      // the element itself has nothing left to contribute.
+      if (el.x !== 0 || el.y !== 0) throw new Error('animation elements are only supported at 0,0');
+      continue;
+    }
     if (el.type === 'text') {
       const font = fonts[el.font ?? 'normal'];
       if (!font) throw new Error(`unsupported font '${el.font}'`);
@@ -497,9 +507,35 @@ async function generate(fonts: Record<string, Font>): Promise<void> {
       days.push({ date, tokensByModel, total: Object.values(tokensByModel).reduce((a, b) => a + b, 0) });
     }
   }
-  const bars = SCREENS.find((s) => s.days === 30) ?? SCREENS[0]!;
-  shots['history-30d'] = paintBars(windowDays(days, bars.days), bars);
-  shots['history-heatmap'] = paintHeatmap(days);
+  // Drive the real module (label, total, and age text live in its render(),
+  // not in the painted chart); the painted frames stand in for the uploaded
+  // asset the chart element references.
+  const statsDir = mkdtempSync(join(tmpdir(), 'readme-shots-'));
+  try {
+    const statsPath = join(statsDir, 'stats-cache.json');
+    writeFileSync(
+      statsPath,
+      JSON.stringify({
+        version: 5,
+        dailyModelTokens: days.map((d) => ({ date: d.date, tokensByModel: d.tokensByModel })),
+      })
+    );
+    const history = claudeHistoryModule({
+      statsPath,
+      todayImpl: () => days.at(-1)!.date, // fresh data: the age mark stays hidden
+      uploadImpl: async () => {},
+      scheduleImpl: () => () => {}, // no timers to keep the process alive
+      intros: false,
+    });
+    history.init?.(nullContext());
+    await history.poll();
+    const bars = SCREENS.find((s) => s.days === 30) ?? SCREENS[0]!;
+    shots['history-30d'] = rasterize(history.render({ refreshing: false }), fonts, paintBars(windowDays(days, bars.days), bars));
+    history.onEncoder?.(2); // 30D -> 7D -> ALL
+    shots['history-heatmap'] = rasterize(history.render({ refreshing: false }), fonts, paintHeatmap(days));
+  } finally {
+    rmSync(statsDir, { recursive: true, force: true });
+  }
 
   // Grok weekly — 38%, 4 days 8 hours to the weekly reset.
   const grok: GrokWeeklyUsage = {
