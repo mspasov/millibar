@@ -1,13 +1,15 @@
 /**
- * Manage and probe the persistent BUSY Bar connection config.
+ * The `mbar` connection subcommands — the management face of
+ * src/connection.ts, kept out of mbar.ts so the entry point stays a thin
+ * argv switch and the handlers stay testable (they return exit codes rather
+ * than calling process.exit).
  *
  * The config is an ordered list of routes — typically the fixed USB-Ethernet
  * IP, the LAN hostname, and the cloud proxy — and every script in this repo
  * uses the first route whose `/api/version` answers. `probe` shows that
  * decision instead of making you infer it from a hung draw call.
- *
- * Usage: bun run tools/device.ts [command]
  */
+import { existsSync } from 'node:fs';
 import {
   candidateRoutes,
   configPath,
@@ -15,27 +17,49 @@ import {
   probeRoute,
   saveDeviceConfig,
   type Route,
-} from '../src/connection';
-import { existsSync } from 'node:fs';
+} from './connection';
 
-const USAGE = `device — BUSY Bar connection routes (config: ${configPath()})
+export const DEVICE_COMMANDS = ['probe', 'show', 'init', 'set', 'rm', 'order'] as const;
+export type DeviceCommand = (typeof DEVICE_COMMANDS)[number];
 
-  bun run tools/device.ts [probe]   try every route, report status and latency
-  bun run tools/device.ts show      print the config (credentials masked)
-  bun run tools/device.ts init      write the config file with the defaults
-  bun run tools/device.ts set <name> <addr> [--token T] [--password P] [--timeout MS] [--first]
-  bun run tools/device.ts rm <name>
-  bun run tools/device.ts order <name> [name...]
+export function isDeviceCommand(command: string): command is DeviceCommand {
+  return (DEVICE_COMMANDS as readonly string[]).includes(command);
+}
+
+export function mbarUsage(): string {
+  return `mbar — usage pressure on a very small bar
+
+Monitor (the default — no arguments):
+
+  mbar                   switchable monitor modules on the BUSY Bar display.
+                         Press the dial to switch modules, START to refresh,
+                         rotate the encoder to cycle views. Ctrl-C stops and
+                         clears the display.
+
+Connection routes (config: ${configPath()}):
+
+  mbar probe             try every route, report status and latency
+  mbar show              print the config (credentials masked)
+  mbar init              write the config file with the defaults
+  mbar set <name> <addr> [--token T] [--password P] [--timeout MS] [--first]
+  mbar rm <name>
+  mbar order <name> [name...]
 
 Routes are tried in order; the first whose /api/version answers like a BUSY
 device wins. 'set' adds or updates a route (--first puts it at the top).
 Credentials: --token is a cloud API token (https://cloud.busy.app/api-tokens,
 for the https://api.busy.app route); --password is the device's HTTP Access
-Password if one is configured. BUSY_BAR_ADDR bypasses the config entirely;
-BUSY_BAR_TOKEN / BUSY_BAR_PASSWORD fill credentials without persisting them.
-`;
+Password if one is configured.
 
-const [command = 'probe', ...args] = process.argv.slice(2);
+Environment:
+
+  BUSY_BAR_ADDR          bypass the route config — exact address, unprobed
+  BUSY_BAR_TOKEN         cloud token for routes that don't carry their own
+  BUSY_BAR_PASSWORD      HTTP Access Password, likewise
+  MBAR_CONFIG            route config path
+  POLL_INTERVAL_MS, REFRESH_COOLDOWN_MS, BUSY_PRIORITY, SWITCH_BUTTON
+                         monitor tuning — see README`;
+}
 
 function fileNote(): string {
   return existsSync(configPath()) ? configPath() : `${configPath()} (not written yet — using defaults)`;
@@ -46,7 +70,7 @@ function describeRoute(route: Route): string {
   return `${route.name.padEnd(8)} ${route.addr.padEnd(28)}${creds ? ` [${creds}]` : ''}`;
 }
 
-async function probeAll(): Promise<void> {
+async function probeAll(): Promise<number> {
   const routes = candidateRoutes();
   console.log(`config: ${process.env.BUSY_BAR_ADDR ? 'BUSY_BAR_ADDR override' : fileNote()}`);
   let winner: string | undefined;
@@ -65,8 +89,9 @@ async function probeAll(): Promise<void> {
   }
   if (winner === undefined) {
     console.error('no route reachable');
-    process.exit(1);
+    return 1;
   }
+  return 0;
 }
 
 function show(): void {
@@ -76,23 +101,19 @@ function show(): void {
   }
 }
 
-/** Load for editing: an absent file starts from the defaults, so the first
- * `set cloud …` yields usb + lan + cloud rather than a cloud-only config. */
-function loadForEdit(): { routes: Route[] } {
-  return loadDeviceConfig();
-}
-
-function set(setArgs: string[]): void {
-  const [name, addr] = setArgs;
-  if (!name || !addr) throw new Error("usage: set <name> <addr> [--token T] [--password P] [--timeout MS] [--first]");
+function set(args: string[]): void {
+  const [name, addr] = args;
+  if (!name || !addr) {
+    throw new Error('usage: mbar set <name> <addr> [--token T] [--password P] [--timeout MS] [--first]');
+  }
   const route: Route = { name, addr };
   let first = false;
-  for (let i = 2; i < setArgs.length; i++) {
-    const flag = setArgs[i]!;
+  for (let i = 2; i < args.length; i++) {
+    const flag = args[i]!;
     if (flag === '--first') {
       first = true;
     } else if (flag === '--token' || flag === '--password' || flag === '--timeout') {
-      const value = setArgs[++i];
+      const value = args[++i];
       if (value === undefined) throw new Error(`${flag} needs a value`);
       if (flag === '--token') route.token = value;
       else if (flag === '--password') route.password = value;
@@ -101,7 +122,9 @@ function set(setArgs: string[]): void {
       throw new Error(`unknown flag '${flag}'`);
     }
   }
-  const cfg = loadForEdit();
+  // An absent file starts from the defaults, so the first `set cloud …`
+  // yields usb + lan + cloud rather than a cloud-only config.
+  const cfg = loadDeviceConfig();
   const existing = cfg.routes.findIndex((r) => r.name === name);
   if (existing >= 0) {
     // Update in place, keeping credentials that weren't re-passed.
@@ -117,8 +140,8 @@ function set(setArgs: string[]): void {
 }
 
 function rm(name?: string): void {
-  if (!name) throw new Error('usage: rm <name>');
-  const cfg = loadForEdit();
+  if (!name) throw new Error('usage: mbar rm <name>');
+  const cfg = loadDeviceConfig();
   if (!cfg.routes.some((r) => r.name === name)) throw new Error(`no route named '${name}'`);
   cfg.routes = cfg.routes.filter((r) => r.name !== name);
   console.log(`wrote ${saveDeviceConfig(cfg)}`);
@@ -126,8 +149,8 @@ function rm(name?: string): void {
 }
 
 function order(names: string[]): void {
-  if (names.length === 0) throw new Error('usage: order <name> [name...]');
-  const cfg = loadForEdit();
+  if (names.length === 0) throw new Error('usage: mbar order <name> [name...]');
+  const cfg = loadDeviceConfig();
   const byName = new Map(cfg.routes.map((r) => [r.name, r]));
   for (const name of names) {
     if (!byName.has(name)) throw new Error(`no route named '${name}'`);
@@ -141,38 +164,38 @@ function order(names: string[]): void {
   show();
 }
 
-try {
-  switch (command) {
-    case 'probe':
-      await probeAll();
-      break;
-    case 'show':
-      show();
-      break;
-    case 'init':
-      if (existsSync(configPath())) throw new Error(`${configPath()} already exists — edit it with 'set'`);
-      console.log(`wrote ${saveDeviceConfig(loadDeviceConfig())}`);
-      show();
-      break;
-    case 'set':
-      set(args);
-      break;
-    case 'rm':
-      rm(args[0]);
-      break;
-    case 'order':
-      order(args);
-      break;
-    case 'help':
-    case '--help':
-    case '-h':
-      console.log(USAGE);
-      break;
-    default:
-      console.error(`unknown command '${command}'\n\n${USAGE}`);
-      process.exit(1);
+function init(): void {
+  if (existsSync(configPath())) {
+    throw new Error(`${configPath()} already exists — edit it with 'mbar set'`);
   }
-} catch (error) {
-  console.error((error as Error).message);
-  process.exit(1);
+  console.log(`wrote ${saveDeviceConfig(loadDeviceConfig())}`);
+  show();
+}
+
+/** Run one connection subcommand; returns the process exit code. */
+export async function runDeviceCommand(command: DeviceCommand, args: string[]): Promise<number> {
+  try {
+    switch (command) {
+      case 'probe':
+        return await probeAll();
+      case 'show':
+        show();
+        return 0;
+      case 'init':
+        init();
+        return 0;
+      case 'set':
+        set(args);
+        return 0;
+      case 'rm':
+        rm(args[0]);
+        return 0;
+      case 'order':
+        order(args);
+        return 0;
+    }
+  } catch (error) {
+    console.error((error as Error).message);
+    return 1;
+  }
 }

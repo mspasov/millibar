@@ -237,7 +237,7 @@ async function resolveFresh(): Promise<Connection> {
   throw new Error(
     `no BUSY Bar reachable — ${failures.join('; ')}. ` +
       `Routes come from ${process.env.BUSY_BAR_ADDR ? 'BUSY_BAR_ADDR' : configPath()}; ` +
-      `'bun run tools/device.ts probe' shows each route's status.`
+      `'mbar probe' shows each route's status.`
   );
 }
 

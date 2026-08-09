@@ -76,9 +76,9 @@ Full detail in DEVICE.md; these are the ones that bite hardest.
 - Prefer built-ins (`Bun.serve`, `WebSocket`, `Bun.file`) over dependencies.
 - `bunx tsc --noEmit` before committing.
 - Every script reaches the device through `src/connection.ts` (persistent route config,
-  probing, credentials — `bun run tools/device.ts probe` to inspect). `BUSY_BAR_ADDR`
-  still overrides everything, unprobed and verbatim, and every script works without it.
-  Wire-level tests get this for free: `stubFetch()` points `BUSY_BAR_ADDR` at itself.
+  probing, credentials — `mbar probe` to inspect). `BUSY_BAR_ADDR` still overrides
+  everything, unprobed and verbatim, and every script works without it. Wire-level
+  tests get this for free: `stubFetch()` points `BUSY_BAR_ADDR` at itself.
 - Comments explain *why* — a firmware constraint, a spec inaccuracy, an ordering
   requirement. The code already says what it does.
 - When you learn something about the device that isn't in DEVICE.md, add it there in the

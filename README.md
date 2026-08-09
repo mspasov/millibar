@@ -37,7 +37,7 @@ it hangs or errors, see [Troubleshooting](#troubleshooting).
 | `bun run tools/chime.ts [freqs-hz...]` | Synthesizes a chime, uploads it, and plays it on the speaker. |
 | `bun run tools/click.ts [--once]` | Clicks the speaker whenever the rotary dial moves. |
 | `bun run tools/screenshot.ts [out.png] [front\|back] [scale]` | Captures a display to PNG. |
-| `bun run tools/device.ts [probe\|show\|init\|set\|rm\|order]` | **Connection config.** Manages the persistent route list (USB / LAN / cloud, with credentials) and probes which route answers. See [Connecting](#connecting-to-the-device). |
+| `mbar probe\|show\|init\|set\|rm\|order` | **Connection config.** Manages the persistent route list (USB / LAN / cloud, with credentials) and probes which route answers. See [Connecting](#connecting-to-the-device). |
 | `bbar` (or `bun run tools/bbar.ts`) | **Storage CLI.** Browse and manage the device's 7 GB `/ext` partition and per-app assets: `ls`/`df`/`cat`/`get`/`put`/`mv`/`mkdir`/`rm`, plus `apps`/`push`/`wipe` for asset directories. `bbar help` for the full list. |
 
 ## Connecting to the device
@@ -56,15 +56,16 @@ order, that answers like a BUSY device wins. If the winning route dies
 mid-run — USB unplugged — the next request re-probes and fails over to the
 next route without a restart.
 
-The list persists in `~/.config/mbar/config.json`, managed with
-`tools/device.ts` (the file is written `0600` because it can hold
+The list persists in `~/.config/mbar/config.json`, managed with `mbar`'s
+connection subcommands (the file is written `0600` because it can hold
 credentials; without it the `usb` + `lan` defaults above apply):
 
 ```sh
-bun run tools/device.ts probe        # every route's status, and which one wins
-bun run tools/device.ts set cloud https://api.busy.app --token <token>
-bun run tools/device.ts set lan 192.168.1.50 --first   # add/update, move to front
-bun run tools/device.ts show|init|rm <name>|order <name...>
+mbar probe        # every route's status, and which one wins
+mbar set cloud https://api.busy.app --token <token>
+mbar set lan 192.168.1.50 --first   # add/update, move to front
+mbar show|init|rm <name>|order <name...>
+mbar --help       # full usage, including the monitor and env vars
 ```
 
 Credentials, both optional, per route:
@@ -208,8 +209,8 @@ module, say, is a sibling fetch client next to `src/usage.ts` plus a factory sha
 
 ## Troubleshooting
 
-**Device unreachable.** `bun run tools/device.ts probe` reports every configured route's
-status and which one scripts will use. To poke by hand: `curl http://10.0.4.20/api/status`
+**Device unreachable.** `mbar probe` reports every configured route's status and which
+one scripts will use. To poke by hand: `curl http://10.0.4.20/api/status`
 (USB-Ethernet, fixed address) or `http://busy.bar/` (LAN).
 
 **Display went black.** Most likely `BACK` was pressed, which dismisses the drawing layer
