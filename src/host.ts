@@ -16,7 +16,7 @@ import { listenInput, type Button, type InputEvent } from './input';
 import { pulseLed, type PulseShape } from './led';
 import { log, logError, logResolved } from './log';
 import { ModuleRunner, wrapIndex, type MonitorModule } from './module';
-import { QuitConfirm, TURN_OFF_MS, ensureTurnOffAsset, turnOffElement } from './quit-confirm';
+import { BACK_SETTLE_MS, QuitConfirm, TURN_OFF_HOLD_MS, ensureTurnOffAsset, turnOffElement } from './quit-confirm';
 
 const BUTTONS: readonly Button[] = ['OK', 'BACK', 'START'];
 
@@ -232,10 +232,14 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
     controller.abort();
     void (async () => {
       if (farewell && (await farewellReady)) {
-        // One non-looping pass; the sleep holds its final frame briefly.
-        // Failures fall through to the clear — never block the exit.
+        // The confirming BACK blanks the screen like any BACK (DEVICE.md);
+        // drawing before that blank lands would get the farewell wiped.
+        await Bun.sleep(BACK_SETTLE_MS);
+        // One non-looping pass; the hold covers the device's slow start and
+        // its final dark frame. Failures fall through to the clear — never
+        // block the exit.
         await session.draw([turnOffElement()]).catch(() => {});
-        await Bun.sleep(TURN_OFF_MS + 150);
+        await Bun.sleep(TURN_OFF_HOLD_MS);
       }
       // Drain the LED chain before clearing: an aborted pulse still sends
       // its light-off frame, and a draw landing after the clear would

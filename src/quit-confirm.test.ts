@@ -25,10 +25,10 @@ function fillWidth(frame: DrawElement[]): number {
 }
 
 describe('QuitConfirm', () => {
-  test('arm() draws the prompt immediately: centred text and a full bar', () => {
+  test('arm() draws the prompt: centred text and a full bar', () => {
     const clock = fakeClock();
     const { frames, draw } = collector();
-    const quit = new QuitConfirm({ draw, onExpire: () => {}, now: clock.now, tickMs: 60_000 });
+    const quit = new QuitConfirm({ draw, onExpire: () => {}, now: clock.now, tickMs: 60_000, armDrawDelayMs: 0 });
     expect(quit.armed).toBe(false);
     quit.arm();
     expect(quit.armed).toBe(true);
@@ -46,10 +46,34 @@ describe('QuitConfirm', () => {
     quit.disarm();
   });
 
+  test('arming is immediate but the paint waits out the firmware blank', async () => {
+    const { frames, draw } = collector();
+    const quit = new QuitConfirm({ draw, onExpire: () => {}, tickMs: 60_000, armDrawDelayMs: 20 });
+    quit.arm();
+    // Armed at once — a second BACK during the wait must still quit — but
+    // nothing painted yet: the firmware's BACK blank is still incoming.
+    expect(quit.armed).toBe(true);
+    expect(frames.length).toBe(0);
+    await Bun.sleep(50);
+    expect(frames.length).toBe(1);
+    quit.disarm();
+  });
+
+  test('disarm during the draw delay cancels the pending prompt', async () => {
+    const { frames, draw } = collector();
+    const quit = new QuitConfirm({ draw, onExpire: () => {}, tickMs: 60_000, armDrawDelayMs: 20 });
+    quit.arm();
+    expect(quit.disarm()).toBe(true);
+    await Bun.sleep(50);
+    // The cancelled paint must never land — it would overdraw the module
+    // screen the caller repainted on disarm.
+    expect(frames.length).toBe(0);
+  });
+
   test('the bar drains with the clock', () => {
     const clock = fakeClock();
     const { draw } = collector();
-    const quit = new QuitConfirm({ draw, onExpire: () => {}, now: clock.now, tickMs: 60_000 });
+    const quit = new QuitConfirm({ draw, onExpire: () => {}, now: clock.now, tickMs: 60_000, armDrawDelayMs: 0 });
     quit.arm();
     clock.advance(2500);
     expect(fillWidth(quit.render())).toBe(36);
@@ -69,6 +93,7 @@ describe('QuitConfirm', () => {
       windowMs: 1000,
       tickMs: 5,
       animate: false,
+      armDrawDelayMs: 0,
     });
     quit.arm();
     clock.advance(600);
@@ -88,6 +113,7 @@ describe('QuitConfirm', () => {
       },
       windowMs: 60,
       tickMs: 10,
+      armDrawDelayMs: 0,
     });
     quit.arm();
     await Bun.sleep(150);
@@ -112,6 +138,7 @@ describe('QuitConfirm', () => {
       },
       windowMs: 40,
       tickMs: 60_000,
+      armDrawDelayMs: 0,
     });
     expect(quit.disarm()).toBe(false);
     quit.arm();
@@ -124,7 +151,7 @@ describe('QuitConfirm', () => {
   test('a second arm while armed keeps the original deadline', () => {
     const clock = fakeClock();
     const { frames, draw } = collector();
-    const quit = new QuitConfirm({ draw, onExpire: () => {}, now: clock.now, tickMs: 60_000 });
+    const quit = new QuitConfirm({ draw, onExpire: () => {}, now: clock.now, tickMs: 60_000, armDrawDelayMs: 0 });
     quit.arm();
     clock.advance(2500);
     quit.arm();

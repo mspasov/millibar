@@ -249,6 +249,14 @@ Playback: upload with `POST /api/assets/upload?application_name=<app>&file=<name
 same `application_name`. Stock animations live in `/ext/apps_assets/shared/animations/`
 (e.g. `coding_72x16.anim`) and play via `stock_path: "shared/coding_72x16.anim"`.
 
+> **Playback start lags the draw's 200 by a variable amount.** For the 90 KB turn-off
+> animation the first frame rendered 200–400 ms after the draw was accepted when
+> `/api/screen` was being polled continuously, but within ~20–50 ms when sampled at a
+> light 60 ms cadence (firmware 1.1.1) — the lag grows under concurrent request load.
+> A wait anchored on the draw response therefore under-runs the playback by up to that
+> much: the quit farewell was visibly truncated mid-fade until its hold budgeted for
+> the slowest observed start (`TURN_OFF_HOLD_MS` in `src/quit-confirm.ts`).
+
 > **`stock_path` resolves only within `shared/`.** Other `apps_assets` directories are
 > unreachable: `soft_off/turn_off_72x16.anim` (the natural reading of the `shared/` form,
 > for a file that exists at `/ext/apps_assets/soft_off/animations/turn_off_72x16.anim`)
@@ -472,6 +480,15 @@ This makes `BACK` look intermittent when it is in fact perfectly consistent: an 
 only redraws occasionally leaves the screen dark until its next draw, so whether you
 notice depends entirely on how soon something repaints. Pressing `BACK` again on an
 already-blank screen also does nothing visible.
+
+The blank *trails* the input event: measured over injected input (firmware 1.1.1,
+tight-polling `/api/screen` with the probe app foregrounded), the screen went black
+5–30 ms **after** the `BACK PRESS` arrived on the state stream, and within ~40 ms of the
+`POST /api/input` (the poll's round trip bounds the resolution). A draw fired in
+immediate reaction to a BACK event therefore races the firmware's own dismissal and can
+land first, only to be wiped — the monitor's quit prompt flashed text → blank → text
+until its first paint learned to wait out the blank (`BACK_SETTLE_MS` in
+`src/quit-confirm.ts`, which the quit farewell waits out too).
 
 Note also that a same-priority draw from a *different* `application_name` was rejected
 while the Canvas app held the display, despite the spec saying equal-priority requests
