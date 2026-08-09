@@ -95,7 +95,7 @@ colors, format})`):
 ## On the BUSY Bar
 
 Implemented: `src/stats.ts` reads the cache (entry-wise, defensively — the file is
-undocumented and version-gated at `version: 5`), and `src/modules/claude-stats.ts`
+undocumented and version-gated at `version: 5`), and `src/modules/claude-history.ts`
 renders it as a monitor module with all three of Claude Code's graph forms, verified
 on-device 2026-08-09:
 
@@ -112,10 +112,10 @@ on-device 2026-08-09:
   range. (A denser 1×2-cell mosaic showed ~31 weeks but read as a brightness blur;
   separated dots won the on-device comparison, 2026-08-09.)
 
-The views are not drawn as display elements — the firmware caps an app at 100 live
+The screens are not drawn as display elements — the firmware caps an app at 100 live
 elements (DEVICE.md), which a stacked 30-day chart brushes and ~360 heatmap cells far
-exceed. Instead each view is painted into a 72×16 pixel buffer and all three are packed
-into one animation asset with a named section per view; rotating the encoder redraws
+exceed. Instead each screen is painted into a 72×16 pixel buffer and all three are packed
+into one animation asset with a named section per screen; rotating the encoder redraws
 one animation element with a different `section`. The section/loop/fps traps this ran
 into are documented in DEVICE.md's animation notes.
 

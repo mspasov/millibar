@@ -7,8 +7,8 @@ import type { DayTokens } from '../stats';
 import { tempDirs } from '../test-util';
 import {
   ASSET_FILE,
-  claudeStatsModule,
-  encodeStatsAsset,
+  claudeHistoryModule,
+  encodeHistoryAsset,
   FAMILY_COLORS,
   formatTokensCompact,
   formatTokensShort,
@@ -24,10 +24,10 @@ import {
   rankFamilies,
   stackSegments,
   windowDays,
-  type ClaudeStatsOptions,
-} from './claude-stats';
+  type ClaudeHistoryOptions,
+} from './claude-history';
 
-const { tempDir, cleanup } = tempDirs('mbar-stats-module-');
+const { tempDir, cleanup } = tempDirs('mbar-history-module-');
 afterEach(cleanup);
 
 const WIDTH = DISPLAYS.front.width;
@@ -249,9 +249,9 @@ describe('formatting', () => {
   });
 });
 
-describe('encodeStatsAsset', () => {
+describe('encodeHistoryAsset', () => {
   test('packs three sections into one device-native container', () => {
-    const data = encodeStatsAsset([day('2026-08-06', { 'claude-fable-5': 100 })]);
+    const data = encodeHistoryAsset([day('2026-08-06', { 'claude-fable-5': 100 })]);
     expect(new TextDecoder().decode(data.slice(0, 8))).toBe('bicycle0');
     expect(data.length).toBeGreaterThan(36);
   });
@@ -262,7 +262,7 @@ describe('module', () => {
 
   function makeModule(
     days: DayTokens[] | null,
-    over: Partial<ClaudeStatsOptions> = {},
+    over: Partial<ClaudeHistoryOptions> = {},
     uploads: Upload[] = [],
     failUploads = 0
   ) {
@@ -270,7 +270,7 @@ describe('module', () => {
     if (days) writeCache(path, days);
     let failures = failUploads;
     const warned: string[] = [];
-    const module = claudeStatsModule({
+    const module = claudeHistoryModule({
       statsPath: path,
       todayImpl: () => '2026-08-06',
       uploadImpl: async (app, file, data) => {
@@ -354,7 +354,7 @@ describe('module', () => {
     expect(byId(module.render({ refreshing: false }), 'label').text).toBe('30D');
   });
 
-  test('every view shares the same four element ids — the app stays tiny', async () => {
+  test('every screen shares the same four element ids — the app stays tiny', async () => {
     const { module } = makeModule([day('2026-08-06', { 'claude-fable-5': 100 })]);
     await module.poll();
     const ids = new Set<string>();

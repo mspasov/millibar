@@ -6,14 +6,14 @@
  * The charts are not drawn as elements. The firmware caps an application at
  * 100 live elements (DEVICE.md) and a 30-day stacked chart alone brushes that
  * — with the heatmap's ~360 cells far past it, and element scrubbing during
- * view switches needing both views' ids alive at once. So the module renders
- * each view into a 72x16 pixel buffer, packs all three into one animation
- * asset with a named section per view, and uploads it when the data changes.
+ * screen switches needing both screens' ids alive at once. So the module renders
+ * each screen into a 72x16 pixel buffer, packs all three into one animation
+ * asset with a named section per screen, and uploads it when the data changes.
  * A frame is then one animation element (pointing at the section) plus three
- * text elements; switching views swaps the `section` name — the pattern
+ * text elements; switching screens swaps the `section` name — the pattern
  * DEVICE.md recommends for state-driven screens.
  *
- * Bar views: one bar per day, newest at the right edge, scaled to the
+ * Bar screens: one bar per day, newest at the right edge, scaled to the
  * window's tallest day and stacked bottom-up by model *family* — a fixed
  * colour per family (Fable, Opus, Sonnet, Haiku; versions merged), heaviest
  * family at the bottom, anything unrecognised in a grey cap. The heatmap is
@@ -23,7 +23,7 @@
  * flatten the rest of the map.
  *
  * Data is Claude Code's local stats cache (src/stats.ts), which only advances
- * when Claude Code itself recomputes it — so every view anchors at the newest
+ * when Claude Code itself recomputes it — so every screen anchors at the newest
  * day *in the data*, not calendar today: trailing days the cache hasn't seen
  * yet would otherwise render as zero-usage lies. The cache is *by design* a
  * day behind (its scanner folds in completed UTC days only), so one day of
@@ -58,8 +58,8 @@ const MAX_BAR_H = 10;
 
 const LABEL_X = 2;
 const TEXT_Y = 3;
-/** Right anchor for the staleness age in the bar views — the same column
- * claude-usage hangs its countdown on, clear of both label and total. */
+/** Right anchor for the staleness age in the bar screens — the same column
+ * claude-gauge hangs its countdown on, clear of both label and total. */
 const AGE_ANCHOR_X = 43;
 
 /** Heatmap geometry: each day is a 2x1 "double dot" with a 1px gap on both
@@ -97,15 +97,15 @@ export function modelFamily(model: string): string {
 /** Heatmap brightness ramp for percentile buckets 1-4. Alpha can't dim LEDs,
  * so the steps scale the components (see scaleRgb). */
 export const HEAT_COLORS = [0.18, 0.38, 0.65, 1].map((f) => scaleRgb('#FF9500FF', f));
-/** An in-range day with zero tokens — dark like the bar views' track, and
+/** An in-range day with zero tokens — dark like the bar screens' track, and
  * distinct from unpainted (black) cells outside the data's range. */
 export const HEAT_ZERO = COLORS.track;
 
-export const ASSET_FILE = 'mbar-stats.anim';
+export const ASSET_FILE = 'mbar-history.anim';
 
-interface StatsView {
+interface HistoryScreen {
   label: string;
-  /** Section name inside ASSET_FILE; view switching is a section switch. */
+  /** Section name inside ASSET_FILE; screen switching is a section switch. */
   section: string;
   kind: 'bars' | 'heat';
   days: number;
@@ -113,8 +113,8 @@ interface StatsView {
   gap: number;
 }
 
-/** Bar views right-align their newest bar to x=70, leaving a 1px margin. */
-const VIEWS: StatsView[] = [
+/** Bar screens right-align their newest bar to x=70, leaving a 1px margin. */
+const SCREENS: HistoryScreen[] = [
   { label: '30D', section: '30d', kind: 'bars', days: 30, barWidth: 1, gap: 1 },
   { label: '7D', section: '7d', kind: 'bars', days: 7, barWidth: 8, gap: 2 },
   { label: 'ALL', section: 'heat', kind: 'heat', days: 0, barWidth: 0, gap: 0 },
@@ -213,23 +213,23 @@ function fillRect(frame: Uint8Array, x: number, y: number, w: number, h: number,
   }
 }
 
-/** A bar view as a full 72x16 RGB frame: dark baseline across the window's
+/** A bar screen as a full 72x16 RGB frame: dark baseline across the window's
  * extent (so idle days still read as part of the chart), stacked bars over
  * it. The top row band stays black for the text elements drawn above. */
-export function paintBars(window: DayTokens[], view: { days: number; barWidth: number; gap: number }): Uint8Array {
+export function paintBars(window: DayTokens[], screen: { days: number; barWidth: number; gap: number }): Uint8Array {
   const frame = new Uint8Array(WIDTH * HEIGHT * 3);
   if (window.length === 0) return frame;
   const ranked = rankFamilies(window);
   const maxTotal = Math.max(...window.map((d) => d.total));
-  const span = view.days * view.barWidth + (view.days - 1) * view.gap;
+  const span = screen.days * screen.barWidth + (screen.days - 1) * screen.gap;
   const x0 = 71 - span;
 
   fillRect(frame, x0, CHART_BOTTOM, span, 1, COLORS.track);
   window.forEach((day, i) => {
-    const x = x0 + i * (view.barWidth + view.gap);
+    const x = x0 + i * (screen.barWidth + screen.gap);
     let below = 0;
     for (const segment of stackSegments(day, ranked, maxTotal)) {
-      fillRect(frame, x, CHART_BOTTOM - below - segment.height + 1, view.barWidth, segment.height, segment.color);
+      fillRect(frame, x, CHART_BOTTOM - below - segment.height + 1, screen.barWidth, segment.height, segment.color);
       below += segment.height;
     }
   });
@@ -318,29 +318,29 @@ export function formatTokensShort(n: number): string {
 
 // --- the module ---------------------------------------------------------------
 
-/** One static frame per view, each written twice so its section spans two
+/** One static frame per screen, each written twice so its section spans two
  * display frames (folded to one file frame of duration 2, so the duplicate is
  * ~free). Both halves of that shape are load-bearing, verified on-device
  * (firmware 1.1.1, DEVICE.md): a looping ONE-frame section is not honoured —
  * playback runs through the file and settles on its last frame, so every
- * view showed the heatmap — and fps is the section-switch latency, since
+ * screen showed the heatmap — and fps is the section-switch latency, since
  * switches land on a frame boundary (1 fps lagged the encoder by up to a
  * second; 30 fps is ~33ms while re-showing the same pixels). */
-export function encodeStatsAsset(days: DayTokens[]): Uint8Array {
+export function encodeHistoryAsset(days: DayTokens[]): Uint8Array {
   const frames = [
-    paintBars(windowDays(days, VIEWS[0]!.days), VIEWS[0]!),
-    paintBars(windowDays(days, VIEWS[1]!.days), VIEWS[1]!),
+    paintBars(windowDays(days, SCREENS[0]!.days), SCREENS[0]!),
+    paintBars(windowDays(days, SCREENS[1]!.days), SCREENS[1]!),
     paintHeatmap(days),
   ].flatMap((frame) => [frame, frame]);
   return encodeAnim(frames, {
     width: WIDTH,
     height: HEIGHT,
     fps: 30,
-    sections: VIEWS.map((view, i) => ({ name: view.section, start: 2 * i, end: 2 * i + 1 })),
+    sections: SCREENS.map((screen, i) => ({ name: screen.section, start: 2 * i, end: 2 * i + 1 })),
   });
 }
 
-export interface ClaudeStatsOptions {
+export interface ClaudeHistoryOptions {
   /** Local file read — 60s keeps the screen a minute behind Claude Code's own
    * recompute at zero cost. */
   pollIntervalMs?: number;
@@ -352,7 +352,7 @@ export interface ClaudeStatsOptions {
   uploadImpl?: typeof assetsUpload;
 }
 
-export function claudeStatsModule(options: ClaudeStatsOptions = {}): MonitorModule {
+export function claudeHistoryModule(options: ClaudeHistoryOptions = {}): MonitorModule {
   const {
     pollIntervalMs = 60_000,
     statsPath = statsCachePath(),
@@ -361,7 +361,7 @@ export function claudeStatsModule(options: ClaudeStatsOptions = {}): MonitorModu
   } = options;
   let ctx: ModuleContext | null = null;
   let history: StatsHistory | null = null;
-  let viewIndex = 0;
+  let screenIndex = 0;
   let warnedMissing = false;
   /** mtime of the cache content the device-side asset was built from; null
    * until the first successful upload, during which the frame is text-only —
@@ -382,7 +382,7 @@ export function claudeStatsModule(options: ClaudeStatsOptions = {}): MonitorModu
     }
     if (loaded.modifiedAtMs !== history?.modifiedAtMs) {
       const newest = loaded.days.at(-1)!.date;
-      const totals = VIEWS.filter((v) => v.kind === 'bars').map(
+      const totals = SCREENS.filter((v) => v.kind === 'bars').map(
         (v) => `${v.label} ${formatTokensCompact(windowDays(loaded.days, v.days).reduce((a, d) => a + d.total, 0))}`
       );
       ctx?.log(`history through ${newest}: ${totals.join(', ')}`);
@@ -396,7 +396,7 @@ export function claudeStatsModule(options: ClaudeStatsOptions = {}): MonitorModu
   const syncAsset = async (): Promise<void> => {
     if (!ctx || !history || uploadedMtimeMs === history.modifiedAtMs) return;
     try {
-      await uploadImpl(ctx.applicationName, ASSET_FILE, encodeStatsAsset(history.days));
+      await uploadImpl(ctx.applicationName, ASSET_FILE, encodeHistoryAsset(history.days));
       uploadedMtimeMs = history.modifiedAtMs;
       ctx.log(`uploaded ${ASSET_FILE}`);
     } catch (error) {
@@ -404,17 +404,17 @@ export function claudeStatsModule(options: ClaudeStatsOptions = {}): MonitorModu
     }
   };
 
-  const windowTotal = (view: StatsView): number => {
+  const windowTotal = (screen: HistoryScreen): number => {
     if (!history) return 0;
-    if (view.kind === 'heat') {
+    if (screen.kind === 'heat') {
       const span = heatSpan(history.days);
       return history.days.reduce((a, d) => (span && Date.parse(d.date) >= span.startMs ? a + d.total : a), 0);
     }
-    return windowDays(history.days, view.days).reduce((a, d) => a + d.total, 0);
+    return windowDays(history.days, screen.days).reduce((a, d) => a + d.total, 0);
   };
 
   return {
-    id: 'stats',
+    id: 'claude-history',
     title: 'Claude history',
 
     init(context) {
@@ -431,7 +431,7 @@ export function claudeStatsModule(options: ClaudeStatsOptions = {}): MonitorModu
     },
 
     render(): DrawElement[] {
-      const view = VIEWS[viewIndex]!;
+      const screen = SCREENS[screenIndex]!;
       const text = (
         id: string,
         value: string,
@@ -462,9 +462,9 @@ export function claudeStatsModule(options: ClaudeStatsOptions = {}): MonitorModu
       // day, i.e. when a recompute is genuinely overdue.
       const stale = ageDays > 1;
       const labelColor = stale ? COLORS.stale : COLORS.label;
-      const label = stale ? `${view.label}?` : view.label;
+      const label = stale ? `${screen.label}?` : screen.label;
       // Kept non-empty while hidden — persisted elements re-render their
-      // previous text under zero alpha otherwise (same trick as claude-usage).
+      // previous text under zero alpha otherwise (same trick as claude-gauge).
       const age = stale ? `-${ageDays}D` : '0';
       const ageColor = stale ? COLORS.reset : HIDDEN(COLORS.reset);
 
@@ -474,7 +474,7 @@ export function claudeStatsModule(options: ClaudeStatsOptions = {}): MonitorModu
           id: 'chart',
           type: 'animation',
           path: ASSET_FILE,
-          section: view.section,
+          section: screen.section,
           // loop:true is load-bearing even though the section is static: a
           // finished loop:false element ignores redraws entirely, so the
           // section could never switch again (verified on-device; DEVICE.md).
@@ -486,28 +486,28 @@ export function claudeStatsModule(options: ClaudeStatsOptions = {}): MonitorModu
           display: 'front',
         });
       }
-      if (view.kind === 'heat') {
+      if (screen.kind === 'heat') {
         // The grid owns the panel from x=20; text stacks in the left margin.
         elements.push(
           text('label', label, labelColor, 'mid_left', LABEL_X),
-          text('total', formatTokensShort(windowTotal(view)), labelColor, 'mid_left', LABEL_X, 8),
+          text('total', formatTokensShort(windowTotal(screen)), labelColor, 'mid_left', LABEL_X, 8),
           text('age', age, ageColor, 'mid_left', LABEL_X, 13)
         );
       } else {
         elements.push(
           text('label', label, labelColor, 'mid_left', LABEL_X),
           text('age', age, ageColor, 'mid_right', AGE_ANCHOR_X),
-          text('total', formatTokensCompact(windowTotal(view)), labelColor, 'mid_right', WIDTH - 2)
+          text('total', formatTokensCompact(windowTotal(screen)), labelColor, 'mid_right', WIDTH - 2)
         );
       }
       return elements;
     },
 
     onEncoder(delta) {
-      viewIndex = wrapIndex(viewIndex, delta, VIEWS.length);
-      const view = VIEWS[viewIndex]!;
+      screenIndex = wrapIndex(screenIndex, delta, SCREENS.length);
+      const screen = SCREENS[screenIndex]!;
       if (history) {
-        ctx?.log(`-> ${view.label} (${formatTokensCompact(windowTotal(view))} tokens)`);
+        ctx?.log(`-> ${screen.label} (${formatTokensCompact(windowTotal(screen))} tokens)`);
       }
     },
   };

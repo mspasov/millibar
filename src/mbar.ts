@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 /**
  * millibar — switchable monitor modules on the BUSY Bar front display.
- * Pressing the dial cycles modules (Claude Code usage, CPU load), START
- * refreshes the active one, and rotating the encoder cycles the views
- * inside a module (usage windows, load windows).
+ * Pressing the dial cycles modules (Claude gauge/dashboard/history, CPU
+ * load), START refreshes the active one, and rotating the encoder cycles
+ * the screens inside a module (limit windows, load windows).
  *
  * The moving parts live elsewhere: src/host.ts runs the modules and owns the
  * device, src/module.ts defines what a module is, src/modules/* are the
@@ -20,9 +20,9 @@
 import { envNumber } from './config';
 import { isDeviceCommand, mbarUsage, runDeviceCommand } from './device-cli';
 import { runHost } from './host';
-import { claudeStatsModule } from './modules/claude-stats';
-import { claudeUsageModule } from './modules/claude-usage';
-import { claudeUsageCombinedModule } from './modules/claude-usage-combined';
+import { claudeDashModule } from './modules/claude-dash';
+import { claudeGaugeModule } from './modules/claude-gauge';
+import { claudeHistoryModule } from './modules/claude-history';
 import { cpuModule } from './modules/cpu';
 import { dedupedFetchUsage } from './usage';
 
@@ -53,8 +53,8 @@ const REFRESH_COOLDOWN_MS = envNumber('REFRESH_COOLDOWN_MS', 5000, 0);
 // that one request per cycle against the rate-limited endpoint. The 30s TTL
 // covers the near-simultaneous twin polls (and puts a freshness floor under
 // START-refreshes) without holding data back longer than anyone would notice
-// at 1% granularity. The combined module is quiet — the primary usage module
-// logs each fetch's story once.
+// at 1% granularity. The dashboard module is quiet — the gauge logs each
+// fetch's story once.
 const usageOptions = {
   pollIntervalMs: POLL_INTERVAL_MS,
   refreshCooldownMs: REFRESH_COOLDOWN_MS,
@@ -62,8 +62,8 @@ const usageOptions = {
 };
 
 await runHost([
-  claudeUsageModule(usageOptions),
-  claudeUsageCombinedModule({ ...usageOptions, quiet: true }),
-  claudeStatsModule(),
+  claudeGaugeModule(usageOptions),
+  claudeDashModule({ ...usageOptions, quiet: true }),
+  claudeHistoryModule(),
   cpuModule(),
 ]);

@@ -4,7 +4,7 @@ import { COLORS, HIDDEN } from '../display';
 import type { ModuleContext } from '../module';
 import { tempDirs } from '../test-util';
 import { loadCachedUsage, NoCredentialsError, RateLimitError, saveCachedUsage, type Usage } from '../usage';
-import { buildViews, claudeUsageModule, type ClaudeUsageOptions } from './claude-usage';
+import { buildScreens, claudeGaugeModule, type ClaudeGaugeOptions } from './claude-gauge';
 
 const usageFixture = (over: Partial<Usage> = {}): Usage => ({
   fiveHour: { utilization: 62, resetsAt: new Date(Date.now() + 2 * 3_600_000).toISOString() },
@@ -29,8 +29,8 @@ const nullContext = (): ModuleContext => {
 const { tempDir: cacheDir, cleanup } = tempDirs('mbar-module-');
 afterEach(cleanup);
 
-function makeModule(fetchImpl: () => Promise<Usage>, over: Partial<ClaudeUsageOptions> = {}) {
-  const module = claudeUsageModule({
+function makeModule(fetchImpl: () => Promise<Usage>, over: Partial<ClaudeGaugeOptions> = {}) {
+  const module = claudeGaugeModule({
     pollIntervalMs: 300_000,
     refreshCooldownMs: 5_000,
     // Instant sweeps by default so renders show settled values, and no cache
@@ -45,21 +45,21 @@ function makeModule(fetchImpl: () => Promise<Usage>, over: Partial<ClaudeUsageOp
   return module;
 }
 
-describe('buildViews', () => {
+describe('buildScreens', () => {
   test('window order is 5H, 7D, then per-model weekly windows uppercased', () => {
-    const views = buildViews(
+    const screens = buildScreens(
       usageFixture({
         models: [{ model: 'Fable', utilization: 12, resetsAt: null }],
       })
     );
-    expect(views.map((v) => v.label)).toEqual(['5H', '7D', 'FABLE']);
-    expect(views[0]!.periodMs).toBe(5 * 3_600_000);
-    expect(views[2]!.periodMs).toBe(7 * 86_400_000);
+    expect(screens.map((v) => v.label)).toEqual(['5H', '7D', 'FABLE']);
+    expect(screens[0]!.periodMs).toBe(5 * 3_600_000);
+    expect(screens[2]!.periodMs).toBe(7 * 86_400_000);
   });
 
   test('missing windows are skipped', () => {
-    const views = buildViews(usageFixture({ fiveHour: null }));
-    expect(views.map((v) => v.label)).toEqual(['7D']);
+    const screens = buildScreens(usageFixture({ fiveHour: null }));
+    expect(screens.map((v) => v.label)).toEqual(['7D']);
   });
 });
 
@@ -129,7 +129,7 @@ describe('poll', () => {
   test('a failed update blinks the light red once, after the cyan fetch pulse', async () => {
     const pulses: Array<{ color: string; shape?: unknown }> = [];
     let fail = false;
-    const module = claudeUsageModule({
+    const module = claudeGaugeModule({
       pollIntervalMs: 300_000,
       refreshCooldownMs: 5_000,
       sweepMs: 0,
@@ -153,7 +153,7 @@ describe('poll', () => {
 
   test('a 429 back-off does not blink red — it is routine, not a fault', async () => {
     const pulses: string[] = [];
-    const module = claudeUsageModule({
+    const module = claudeGaugeModule({
       pollIntervalMs: 300_000,
       refreshCooldownMs: 5_000,
       sweepMs: 0,
@@ -172,7 +172,7 @@ describe('poll', () => {
     const logs: string[] = [];
     const warns: string[] = [];
     let fail = true;
-    const module = claudeUsageModule({
+    const module = claudeGaugeModule({
       pollIntervalMs: 300_000,
       refreshCooldownMs: 5_000,
       sweepMs: 0,
@@ -197,7 +197,7 @@ describe('poll', () => {
   test('a 429 logs the back-off end as routine, not a warning', async () => {
     const logs: string[] = [];
     const warns: string[] = [];
-    const module = claudeUsageModule({
+    const module = claudeGaugeModule({
       pollIntervalMs: 300_000,
       refreshCooldownMs: 5_000,
       sweepMs: 0,
@@ -217,7 +217,7 @@ describe('poll', () => {
   test('the summary logs only when a value changes', async () => {
     const logs: string[] = [];
     let utilization = 62;
-    const module = claudeUsageModule({
+    const module = claudeGaugeModule({
       pollIntervalMs: 300_000,
       refreshCooldownMs: 5_000,
       sweepMs: 0,
@@ -349,7 +349,7 @@ describe('render', () => {
     // A sweep far longer than the test: the first frame shows the start of
     // the roll up from 0% with the leading edge lit, not the settled value.
     const controller = new AbortController();
-    const module = claudeUsageModule({
+    const module = claudeGaugeModule({
       pollIntervalMs: 300_000,
       refreshCooldownMs: 5_000,
       sweepMs: 600_000,

@@ -33,7 +33,7 @@ Monitor (the default — no arguments):
 
   mbar                   switchable monitor modules on the BUSY Bar display.
                          Press the dial to switch modules, START to refresh,
-                         rotate the encoder to cycle views. Ctrl-C stops and
+                         rotate the encoder to cycle screens. Ctrl-C stops and
                          clears the display.
 
 Connection routes (config: ${configPath()}):

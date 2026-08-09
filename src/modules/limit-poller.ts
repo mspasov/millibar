@@ -1,11 +1,10 @@
 /**
- * Shared machinery for the two Claude usage modules (per-window and
- * combined): the window list, the poll loop with its stale/back-off/cache
- * behaviour, and the pace tick. Each module owns a UsagePoller instance —
- * separate stale and back-off state — while the network fetch itself is
- * deduplicated across modules by `dedupedFetchUsage` (src/usage.ts), so two
- * modules polling on the same cadence cost the rate-limited endpoint one
- * request per cycle.
+ * Shared machinery for the Claude gauge and dashboard modules: the limit
+ * window list, the poll loop with its stale/back-off/cache behaviour, and
+ * the pace tick. Each module owns a LimitPoller instance — separate stale
+ * and back-off state — while the network fetch itself is deduplicated across
+ * modules by `dedupedFetchUsage` (src/usage.ts), so two modules polling on
+ * the same cadence cost the rate-limited endpoint one request per cycle.
  */
 import { COLORS, HIDDEN, scaleRgb, type DrawElement } from '../display';
 import { clockTime, formatDuration } from '../log';
@@ -21,7 +20,8 @@ import {
   type UsageWindow,
 } from '../usage';
 
-export interface View {
+/** One encoder stop: a limit window under its on-screen label. */
+export interface Screen {
   label: string;
   window: UsageWindow;
   /** Length of the usage window; its start is `resetsAt - periodMs`. */
@@ -58,16 +58,16 @@ export function formatReset(resetsAt: string | null): string {
 
 /** The windows available to cycle through, in a stable order. Per-model windows
  * come and go as the API adds or drops them, so this is rebuilt on every poll. */
-export function buildViews(usage: Usage): View[] {
-  const views: View[] = [];
-  if (usage.fiveHour) views.push({ label: '5H', window: usage.fiveHour, periodMs: FIVE_HOURS_MS });
-  if (usage.sevenDay) views.push({ label: '7D', window: usage.sevenDay, periodMs: SEVEN_DAYS_MS });
+export function buildScreens(usage: Usage): Screen[] {
+  const screens: Screen[] = [];
+  if (usage.fiveHour) screens.push({ label: '5H', window: usage.fiveHour, periodMs: FIVE_HOURS_MS });
+  if (usage.sevenDay) screens.push({ label: '7D', window: usage.sevenDay, periodMs: SEVEN_DAYS_MS });
   for (const model of usage.models) {
     // Fonts are bitmap ASCII; uppercase keeps the label visually consistent.
     // Model-scoped limits are weekly windows, like 7D.
-    views.push({ label: model.model.toUpperCase(), window: model, periodMs: SEVEN_DAYS_MS });
+    screens.push({ label: model.model.toUpperCase(), window: model, periodMs: SEVEN_DAYS_MS });
   }
-  return views;
+  return screens;
 }
 
 /** Pace tick: where "now" sits in the window, so a bar reads as a race —
@@ -80,13 +80,13 @@ export function buildViews(usage: Usage): View[] {
  * visible when submerged. */
 export function paceTick(
   id: string,
-  view: View,
+  screen: Screen,
   bar: { x: number; y: number; width: number; height: number },
   fillPct: number,
   fillColor: string
 ): DrawElement {
-  const remainingMs = view.window.resetsAt ? new Date(view.window.resetsAt).getTime() - Date.now() : NaN;
-  const timeFraction = Math.min(1, Math.max(0, 1 - remainingMs / view.periodMs));
+  const remainingMs = screen.window.resetsAt ? new Date(screen.window.resetsAt).getTime() - Date.now() : NaN;
+  const timeFraction = Math.min(1, Math.max(0, 1 - remainingMs / screen.periodMs));
   const tickX = bar.x + (Number.isFinite(timeFraction) ? Math.round(timeFraction * (bar.width - 1)) : 0);
   const fillWidth = Math.max(1, Math.round((bar.width * fillPct) / 100));
   const color = Number.isFinite(timeFraction)
@@ -110,7 +110,7 @@ export function paceTick(
   };
 }
 
-export interface UsageModuleOptions {
+export interface LimitModuleOptions {
   pollIntervalMs: number;
   /** Floor between API fetches, so holding a button can't hammer the endpoint
    * into a 429. */
@@ -131,8 +131,8 @@ export interface UsageModuleOptions {
   quiet?: boolean;
 }
 
-export class UsagePoller {
-  views: View[] = [];
+export class LimitPoller {
+  screens: Screen[] = [];
   stale = false;
   private ctx: ModuleContext | null = null;
   private readonly cachePath: string | null;
@@ -150,12 +150,12 @@ export class UsagePoller {
   private lastSummary = '';
 
   constructor(
-    private readonly options: UsageModuleOptions,
-    /** Called whenever views or staleness changed — with the view list from
+    private readonly options: LimitModuleOptions,
+    /** Called whenever screens or staleness changed — with the screen list from
      * before the change, so the module can re-find its selection by label
      * (the list is rebuilt every poll as model windows come and go) and
      * re-aim its animation. */
-    private readonly onData: (previousViews: View[]) => void
+    private readonly onData: (previousScreens: Screen[]) => void
   ) {
     this.cachePath = options.cachePath === undefined ? USAGE_CACHE_PATH : options.cachePath;
     this.fetchImpl = options.fetchUsageImpl ?? fetchUsage;
@@ -170,7 +170,7 @@ export class UsagePoller {
     if (!this.cachePath) return;
     const cached = loadCachedUsage(this.cachePath);
     if (!cached) return;
-    this.views = buildViews(cached);
+    this.screens = buildScreens(cached);
     this.stale = true;
     this.onData([]);
     if (!this.options.quiet) {
@@ -181,16 +181,16 @@ export class UsagePoller {
   /** One poll cycle: fetch, rebuild the window list, persist, log. `focus` is
    * consulted for the summary line — which window's reset matters is the
    * module's business. */
-  async poll(focus: () => View | null): Promise<PollResult> {
+  async poll(focus: () => Screen | null): Promise<PollResult> {
     const { pollIntervalMs, refreshCooldownMs, quiet } = this.options;
     this.ctx?.pulseActivity(COLORS.refresh);
     try {
       const usage = await this.fetchImpl();
-      const previousViews = this.views;
-      this.views = buildViews(usage);
+      const previousScreens = this.screens;
+      this.screens = buildScreens(usage);
       this.stale = false;
       this.rateLimitStreak = 0;
-      this.onData(previousViews);
+      this.onData(previousScreens);
       if (this.cachePath) await saveCachedUsage(usage, this.cachePath);
 
       if (this.failedPolls > 0) {
@@ -202,12 +202,12 @@ export class UsagePoller {
         }
         this.failedPolls = 0;
       }
-      const summary = this.views.map((v) => `${v.label} ${v.window.utilization}%`).join(' | ');
+      const summary = this.screens.map((v) => `${v.label} ${v.window.utilization}%`).join(' | ');
       if (summary !== this.lastSummary) {
         this.lastSummary = summary;
-        const view = focus();
-        if (!quiet && view) {
-          this.ctx?.log(`${summary} (${view.label}: ${formatReset(view.window.resetsAt)})`);
+        const screen = focus();
+        if (!quiet && screen) {
+          this.ctx?.log(`${summary} (${screen.label}: ${formatReset(screen.window.resetsAt)})`);
         }
       }
       return { nextPollMs: pollIntervalMs, holdRefreshMs: refreshCooldownMs };
@@ -218,7 +218,7 @@ export class UsagePoller {
       if (this.failedPolls === 0) this.staleSince = Date.now();
       this.failedPolls += 1;
       this.stale = true;
-      this.onData(this.views);
+      this.onData(this.screens);
       if (error instanceof RateLimitError) {
         // Routine back-off, not a fault — no red blink, or it would recur
         // every backed-off cycle for as long as the API stays rate-limited.

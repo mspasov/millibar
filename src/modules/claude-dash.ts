@@ -1,7 +1,7 @@
 /**
- * Every Claude Code usage limit window on one screen — the combined companion
- * to src/modules/claude-usage.ts, registered as its own module so a dial
- * press switches to it.
+ * The Claude dashboard: every Claude Code usage limit window on one screen —
+ * the companion to src/modules/claude-gauge.ts, registered as its own module
+ * so a dial press switches to it.
  *
  * Layout (72x16): the selected window's detail on top — label on the left,
  * reset countdown in dark grey, percentage on the right — and a bar strip
@@ -14,8 +14,8 @@
  * window on screen at once, a bar animating from another window's value
  * would misreport both windows mid-sweep.
  *
- * Fetching, staleness, back-off, and caching live in the shared UsagePoller;
- * mbar.ts hands both usage modules one deduplicated fetcher so the pair costs
+ * Fetching, staleness, back-off, and caching live in the shared LimitPoller;
+ * mbar.ts hands both limit modules one deduplicated fetcher so the pair costs
  * the rate-limited endpoint a single request per cycle, and passes this
  * module `quiet` so the shared story is logged once.
  */
@@ -32,7 +32,7 @@ import {
 } from '../display';
 import { PctSweep, sweepHead } from '../sweep';
 import { wrapIndex, type ModuleContext, type MonitorModule, type RenderFrame } from '../module';
-import { formatReset, paceTick, UsagePoller, type UsageModuleOptions, type View } from './usage-poller';
+import { formatReset, paceTick, LimitPoller, type LimitModuleOptions, type Screen } from './limit-poller';
 
 const WIDTH = DISPLAYS.front.width;
 
@@ -53,8 +53,8 @@ const MARKER_WIDTH = 2;
  * severity at a glance. */
 const UNSELECTED_SCALE = 0.45;
 
-/** Same countdown geometry as the per-window module (see the comment there
- * on the mid_right anchor). */
+/** Same countdown geometry as the gauge module (see the comment there on the
+ * mid_right anchor). */
 const LABEL_X = 2;
 const RESET_ANCHOR_X = 43;
 const RESET_RIGHT_EDGE = RESET_ANCHOR_X - 2;
@@ -63,7 +63,7 @@ const DOT_XS = [RESET_RIGHT_EDGE - 9, RESET_RIGHT_EDGE - 5, RESET_RIGHT_EDGE - 1
 
 /** Row layout of the bar strip for a given window count. Three windows — the
  * normal case — get 2px bars with a row of air between; the gaps close up at
- * four, and a lone window keeps a chunky bar near the per-window module's
+ * four, and a lone window keeps a chunky bar near the gauge module's
  * spot. Five-plus drops to 1px rows; past eight the panel is out of rows and
  * the remainder are not drawn (the encoder still reaches them). */
 function stripSlots(count: number): Array<{ y: number; height: number }> {
@@ -94,9 +94,9 @@ function stripSlots(count: number): Array<{ y: number; height: number }> {
   }
 }
 
-export function claudeUsageCombinedModule(options: UsageModuleOptions): MonitorModule {
+export function claudeDashModule(options: LimitModuleOptions): MonitorModule {
   let ctx: ModuleContext | null = null;
-  let viewIndex = 0;
+  let screenIndex = 0;
 
   /** Two animations with different rules. The number (and its colour) rolls
    * on every change, selection moves included — motion in the readout says
@@ -117,27 +117,27 @@ export function claudeUsageCombinedModule(options: UsageModuleOptions): MonitorM
   });
   barSweep.set(0, severityColor(0));
 
-  const poller = new UsagePoller(options, (previousViews) => {
+  const poller = new LimitPoller(options, (previousScreens) => {
     // Keep the selection on the same window across refreshes even if the
     // list changed.
-    const previousLabel = previousViews[viewIndex]?.label;
-    const sameView = poller.views.findIndex((v) => v.label === previousLabel);
-    viewIndex = sameView >= 0 ? sameView : Math.min(viewIndex, Math.max(poller.views.length - 1, 0));
+    const previousLabel = previousScreens[screenIndex]?.label;
+    const sameScreen = poller.screens.findIndex((v) => v.label === previousLabel);
+    screenIndex = sameScreen >= 0 ? sameScreen : Math.min(screenIndex, Math.max(poller.screens.length - 1, 0));
     // A vanished window drops the selection onto a different one — snap the
-    // bar, as for an encoder move. The very first data (no previous views)
+    // bar, as for an encoder move. The very first data (no previous screens)
     // sweeps: that's the startup reveal rising from 0, not another window's
     // value.
-    retarget({ snapBar: previousViews.length > 0 && sameView < 0 });
+    retarget({ snapBar: previousScreens.length > 0 && sameScreen < 0 });
   });
 
-  const currentView = (): View | null => poller.views[viewIndex] ?? null;
+  const currentScreen = (): Screen | null => poller.screens[screenIndex] ?? null;
 
-  /** Point both animations at the selected view's value; staleness rides the
+  /** Point both animations at the selected screen's value; staleness rides the
    * colour, so going stale fades to grey in place instead of snapping. */
   const retarget = ({ snapBar = false }: { snapBar?: boolean } = {}): void => {
-    const view = currentView();
-    if (!view) return;
-    const pct = Math.max(0, Math.min(100, view.window.utilization));
+    const screen = currentScreen();
+    if (!screen) return;
+    const pct = Math.max(0, Math.min(100, screen.window.utilization));
     const color = poller.stale ? COLORS.stale : severityColor(pct);
     textSweep.to(pct, color);
     if (snapBar) barSweep.set(pct, color);
@@ -145,8 +145,8 @@ export function claudeUsageCombinedModule(options: UsageModuleOptions): MonitorM
   };
 
   return {
-    id: 'claude-all',
-    title: 'Claude usage combined',
+    id: 'claude-dash',
+    title: 'Claude dashboard',
 
     init(context) {
       ctx = context;
@@ -157,35 +157,35 @@ export function claudeUsageCombinedModule(options: UsageModuleOptions): MonitorM
       poller.init(context);
     },
 
-    poll: () => poller.poll(currentView),
+    poll: () => poller.poll(currentScreen),
 
     render(frame: RenderFrame): DrawElement[] {
-      const view = currentView();
-      if (!view) return [];
+      const screen = currentScreen();
+      if (!screen) return [];
 
-      // The animated view of the data: pct is fractional mid-sweep, colour is
-      // mid-lerp. retarget() keeps both tweens pointed at the selected view.
+      // The animated reading of the data: pct is fractional mid-sweep, colour
+      // is mid-lerp. retarget() keeps both tweens pointed at the selected screen.
       const shown = textSweep.current();
       const { pct, color } = shown;
       const barShown = barSweep.current();
       const dotColor = frame.refreshing ? COLORS.refresh : HIDDEN(COLORS.refresh);
-      const labelText = poller.stale ? `${view.label}?` : view.label;
+      const labelText = poller.stale ? `${screen.label}?` : screen.label;
       const labelEnd = LABEL_X + textWidth(labelText) - 1;
-      const resetText = formatResetCompact(view.window.resetsAt, RESET_RIGHT_EDGE - labelEnd - RESET_GAP);
+      const resetText = formatResetCompact(screen.window.resetsAt, RESET_RIGHT_EDGE - labelEnd - RESET_GAP);
       // Hidden while the refresh dots occupy its spot, and when nothing fits.
       const resetColor = resetText && !frame.refreshing ? COLORS.reset : HIDDEN(COLORS.reset);
 
-      const slots = stripSlots(poller.views.length);
-      const selectedSlot = slots[Math.min(viewIndex, slots.length - 1)]!;
+      const slots = stripSlots(poller.screens.length);
+      const selectedSlot = slots[Math.min(screenIndex, slots.length - 1)]!;
       // With a single window there is no selection to mark.
       const markerColor =
-        poller.views.length > 1 ? (poller.stale ? COLORS.stale : COLORS.label) : HIDDEN(COLORS.label);
+        poller.screens.length > 1 ? (poller.stale ? COLORS.stale : COLORS.label) : HIDDEN(COLORS.label);
 
       const bars: DrawElement[] = [];
-      poller.views.forEach((v, i) => {
+      poller.screens.forEach((v, i) => {
         const slot = slots[i];
         if (!slot) return;
-        const selected = i === viewIndex;
+        const selected = i === screenIndex;
         // The selected bar renders its own animation, so a poll's value change
         // and the stale fade still glide — but it never wears another window's
         // value: selection changes snap it (see retarget). The rest sit at
@@ -273,15 +273,15 @@ export function claudeUsageCombinedModule(options: UsageModuleOptions): MonitorM
     },
 
     onEncoder(delta) {
-      if (poller.views.length < 2) return;
-      viewIndex = wrapIndex(viewIndex, delta, poller.views.length);
+      if (poller.screens.length < 2) return;
+      screenIndex = wrapIndex(screenIndex, delta, poller.screens.length);
       // The label and countdown switch instantly, the marker jumps, and the
       // number rolls to the new window's value. The bar snaps: each row keeps
       // showing its own window's truth.
       retarget({ snapBar: true });
-      const view = currentView();
-      if (view) {
-        ctx?.log(`-> ${view.label} ${view.window.utilization}% (${formatReset(view.window.resetsAt)})`);
+      const screen = currentScreen();
+      if (screen) {
+        ctx?.log(`-> ${screen.label} ${screen.window.utilization}% (${formatReset(screen.window.resetsAt)})`);
       }
     },
   };

@@ -3,9 +3,9 @@
  * host's switching and element scrubbing.
  *
  * Shows the machine's load average normalised by core count, in the same
- * visual language as the Claude module: label left, percentage right,
- * progress bar along the bottom. Rotating the encoder cycles the 1/5/15-minute
- * windows. Load average is what the OS actually publishes (os.loadavg), so the
+ * visual language as the Claude gauge: label left, percentage right,
+ * progress bar along the bottom. Rotating the encoder cycles the screens,
+ * one per 1/5/15-minute load window. Load average is what the OS actually publishes (os.loadavg), so the
  * label says which window it is rather than pretending to be instantaneous
  * CPU%. No activity indicator and no LED pulse: sampling is local and
  * instant, and a pulse every two seconds would strobe.
@@ -23,7 +23,8 @@ const BAR_Y = 12;
 const BAR_HEIGHT = 3;
 const LABEL_X = 2;
 
-const WINDOWS = [
+/** One screen per load-average window os.loadavg publishes. */
+const SCREENS = [
   { label: 'CPU 1M', index: 0 },
   { label: 'CPU 5M', index: 1 },
   { label: 'CPU 15M', index: 2 },
@@ -45,7 +46,7 @@ export interface CpuOptions {
 export function cpuModule(options: CpuOptions = {}): MonitorModule {
   const cores = os.cpus().length;
   let ctx: ModuleContext | null = null;
-  let viewIndex = 0;
+  let screenIndex = 0;
   let loads: number[] = [0, 0, 0];
 
   const sweep = new PctSweep({
@@ -59,7 +60,7 @@ export function cpuModule(options: CpuOptions = {}): MonitorModule {
     Math.min(100, Math.round(((loads[window] ?? 0) / cores) * 100));
 
   const retarget = (minSweepDelta = 0): void => {
-    const pct = pctFor(WINDOWS[viewIndex]!.index);
+    const pct = pctFor(SCREENS[screenIndex]!.index);
     const color = severityColor(pct);
     if (Math.abs(pct - sweep.current().pct) < minSweepDelta) sweep.set(pct, color);
     else sweep.to(pct, color);
@@ -82,14 +83,14 @@ export function cpuModule(options: CpuOptions = {}): MonitorModule {
     },
 
     render(): DrawElement[] {
-      const view = WINDOWS[viewIndex]!;
+      const screen = SCREENS[screenIndex]!;
       const shown = sweep.current();
       const { pct, color } = shown;
       return [
         {
           id: 'label',
           type: 'text',
-          text: view.label,
+          text: screen.label,
           font: 'small',
           color: COLORS.label,
           align: 'mid_left',
@@ -114,8 +115,8 @@ export function cpuModule(options: CpuOptions = {}): MonitorModule {
     },
 
     onEncoder(delta) {
-      viewIndex = wrapIndex(viewIndex, delta, WINDOWS.length);
-      // View switches always sweep — the head flash doubles as feedback that
+      screenIndex = wrapIndex(screenIndex, delta, SCREENS.length);
+      // Screen switches always sweep — the head flash doubles as feedback that
       // the rotation registered, even when the windows' values sit close.
       retarget();
     },

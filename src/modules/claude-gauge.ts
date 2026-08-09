@@ -1,16 +1,17 @@
 /**
- * Claude Code usage limits as a monitor module.
+ * The Claude gauge: one Claude Code usage limit at a time, given the whole
+ * panel.
  *
  * Layout (72x16): window label on the left, reset countdown in dark grey and
  * percentage on the right, and a progress bar along the bottom. A faint tick
  * on the bar marks how much of the window has elapsed — fill ahead of the tick
  * means tokens are going faster than time. Colour tracks severity. Rotating
- * the encoder cycles through the available limit windows (5-hour, 7-day, and
+ * the encoder cycles the screens, one per limit window (5-hour, 7-day, and
  * any per-model weekly windows such as Fable). The sibling module
- * src/modules/claude-usage-combined.ts shows every window at once; this one
- * gives the selected window the whole panel.
+ * src/modules/claude-dash.ts shows every window at once; this one gives the
+ * selected window the whole panel.
  *
- * Value changes animate (src/sweep.ts): polls, going stale, and encoder view
+ * Value changes animate (src/sweep.ts): polls, going stale, and encoder screen
  * switches all sweep the bar and roll the number instead of snapping.
  *
  * The last successful read is persisted to ~/.cache/mbar/usage.json, so a
@@ -29,10 +30,10 @@ import {
 } from '../display';
 import { PctSweep, sweepHead } from '../sweep';
 import { wrapIndex, type ModuleContext, type MonitorModule, type RenderFrame } from '../module';
-import { formatReset, paceTick, UsagePoller, type UsageModuleOptions, type View } from './usage-poller';
+import { formatReset, paceTick, LimitPoller, type LimitModuleOptions, type Screen } from './limit-poller';
 
-export { buildViews } from './usage-poller';
-export type ClaudeUsageOptions = UsageModuleOptions;
+export { buildScreens } from './limit-poller';
+export type ClaudeGaugeOptions = LimitModuleOptions;
 
 const WIDTH = DISPLAYS.front.width;
 const BAR_Y = 12;
@@ -53,9 +54,9 @@ const DOT_XS = [RESET_RIGHT_EDGE - 9, RESET_RIGHT_EDGE - 5, RESET_RIGHT_EDGE - 1
 const DOT_Y = 4;
 const DOT_SIZE = 2;
 
-export function claudeUsageModule(options: ClaudeUsageOptions): MonitorModule {
+export function claudeGaugeModule(options: ClaudeGaugeOptions): MonitorModule {
   let ctx: ModuleContext | null = null;
-  let viewIndex = 0;
+  let screenIndex = 0;
 
   const sweep = new PctSweep({
     durationMs: options.sweepMs,
@@ -64,29 +65,29 @@ export function claudeUsageModule(options: ClaudeUsageOptions): MonitorModule {
   });
   sweep.set(0, severityColor(0));
 
-  const poller = new UsagePoller(options, (previousViews) => {
+  const poller = new LimitPoller(options, (previousScreens) => {
     // Keep showing the same window across refreshes even if the list changed.
-    const previousLabel = previousViews[viewIndex]?.label;
-    const sameView = poller.views.findIndex((v) => v.label === previousLabel);
-    viewIndex = sameView >= 0 ? sameView : Math.min(viewIndex, Math.max(poller.views.length - 1, 0));
+    const previousLabel = previousScreens[screenIndex]?.label;
+    const sameScreen = poller.screens.findIndex((v) => v.label === previousLabel);
+    screenIndex = sameScreen >= 0 ? sameScreen : Math.min(screenIndex, Math.max(poller.screens.length - 1, 0));
     retarget();
   });
 
-  const currentView = (): View | null => poller.views[viewIndex] ?? null;
+  const currentScreen = (): Screen | null => poller.screens[screenIndex] ?? null;
 
-  /** Point the sweep at the current view's value; staleness rides the colour,
+  /** Point the sweep at the current screen's value; staleness rides the colour,
    * so going stale fades to grey in place instead of snapping. The first poll
    * sweeps up from 0 — the startup reveal. */
   const retarget = (): void => {
-    const view = currentView();
-    if (!view) return;
-    const pct = Math.max(0, Math.min(100, view.window.utilization));
+    const screen = currentScreen();
+    if (!screen) return;
+    const pct = Math.max(0, Math.min(100, screen.window.utilization));
     sweep.to(pct, poller.stale ? COLORS.stale : severityColor(pct));
   };
 
   return {
-    id: 'claude',
-    title: 'Claude usage',
+    id: 'claude-gauge',
+    title: 'Claude gauge',
 
     init(context) {
       ctx = context;
@@ -94,20 +95,20 @@ export function claudeUsageModule(options: ClaudeUsageOptions): MonitorModule {
       poller.init(context);
     },
 
-    poll: () => poller.poll(currentView),
+    poll: () => poller.poll(currentScreen),
 
     render(frame: RenderFrame): DrawElement[] {
-      const view = currentView();
-      if (!view) return [];
+      const screen = currentScreen();
+      if (!screen) return [];
 
-      // The animated view of the data: pct is fractional mid-sweep, colour is
-      // mid-lerp. retarget() keeps the tween pointed at the current view.
+      // The animated reading of the data: pct is fractional mid-sweep, colour
+      // is mid-lerp. retarget() keeps the tween pointed at the current screen.
       const shown = sweep.current();
       const { pct, color } = shown;
       const dotColor = frame.refreshing ? COLORS.refresh : HIDDEN(COLORS.refresh);
-      const labelText = poller.stale ? `${view.label}?` : view.label;
+      const labelText = poller.stale ? `${screen.label}?` : screen.label;
       const labelEnd = LABEL_X + textWidth(labelText) - 1;
-      const resetText = formatResetCompact(view.window.resetsAt, RESET_RIGHT_EDGE - labelEnd - RESET_GAP);
+      const resetText = formatResetCompact(screen.window.resetsAt, RESET_RIGHT_EDGE - labelEnd - RESET_GAP);
       // Hidden while the refresh dots occupy its spot, and when nothing fits.
       const resetColor = resetText && !frame.refreshing ? COLORS.reset : HIDDEN(COLORS.reset);
 
@@ -150,7 +151,7 @@ export function claudeUsageModule(options: ClaudeUsageOptions): MonitorModule {
           display: 'front',
         },
         ...progressBar({ pct, color, y: BAR_Y, width: WIDTH, height: BAR_HEIGHT }),
-        paceTick('pace', view, bar, pct, color),
+        paceTick('pace', screen, bar, pct, color),
         // After 'pace': a sweeping head passes over it.
         sweepHead(shown, bar),
         ...DOT_XS.map((x, i) => ({
@@ -171,14 +172,14 @@ export function claudeUsageModule(options: ClaudeUsageOptions): MonitorModule {
     },
 
     onEncoder(delta) {
-      if (poller.views.length < 2) return;
-      viewIndex = wrapIndex(viewIndex, delta, poller.views.length);
+      if (poller.screens.length < 2) return;
+      screenIndex = wrapIndex(screenIndex, delta, poller.screens.length);
       // The label and countdown switch instantly; the bar and number sweep
       // from the previous window's value to this one's.
       retarget();
-      const view = currentView();
-      if (view) {
-        ctx?.log(`-> ${view.label} ${view.window.utilization}% (${formatReset(view.window.resetsAt)})`);
+      const screen = currentScreen();
+      if (screen) {
+        ctx?.log(`-> ${screen.label} ${screen.window.utilization}% (${formatReset(screen.window.resetsAt)})`);
       }
     },
   };

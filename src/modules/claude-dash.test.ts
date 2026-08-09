@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { COLORS, HIDDEN, scaleRgb } from '../display';
 import type { ModuleContext } from '../module';
 import { RateLimitError, type Usage } from '../usage';
-import { claudeUsageCombinedModule } from './claude-usage-combined';
-import type { UsageModuleOptions } from './usage-poller';
+import { claudeDashModule } from './claude-dash';
+import type { LimitModuleOptions } from './limit-poller';
 
 const usageFixture = (over: Partial<Usage> = {}): Usage => ({
   fiveHour: { utilization: 62, resetsAt: new Date(Date.now() + 2 * 3_600_000).toISOString() },
@@ -25,8 +25,8 @@ const nullContext = (): ModuleContext => {
   return context;
 };
 
-function makeModule(fetchImpl: () => Promise<Usage>, over: Partial<UsageModuleOptions> = {}, ctx?: Partial<ModuleContext>) {
-  const module = claudeUsageCombinedModule({
+function makeModule(fetchImpl: () => Promise<Usage>, over: Partial<LimitModuleOptions> = {}, ctx?: Partial<ModuleContext>) {
+  const module = claudeDashModule({
     pollIntervalMs: 300_000,
     refreshCooldownMs: 5_000,
     sweepMs: 0,

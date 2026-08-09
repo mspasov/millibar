@@ -10,7 +10,7 @@
  *
  * Adding a module means implementing `MonitorModule` and registering it in
  * src/mbar.ts; a future Grok-usage module is a sibling fetch client plus a
- * factory like src/modules/claude-usage.ts — nothing here changes.
+ * factory like src/modules/claude-gauge.ts — nothing here changes.
  */
 import type { DrawElement } from './display';
 import type { PulseShape } from './led';

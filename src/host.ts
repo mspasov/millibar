@@ -128,7 +128,7 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
     'host',
     `millibar: ${modules.map((m) => m.title).join(', ')} via ${conn ? describeConnection(conn) : 'no reachable route yet — still probing'} — ` +
       `press ${switchButton} (the dial) for the next module, START to refresh, ` +
-      'rotate the encoder to cycle views (Ctrl-C to stop and clear)'
+      'rotate the encoder to cycle screens (Ctrl-C to stop and clear)'
   );
 
   modules.forEach((module, index) => {

@@ -138,7 +138,7 @@ so a default-priority draw won't interrupt a focus session.
 > (charts, grids — anything approaching per-pixel drawing) don't fit element rendering
 > at all; render a pixel buffer into a one-frame animation asset instead
 > (`src/anim.ts` + `/api/assets/upload`, one element total — see the animation-section
-> notes below and `src/modules/claude-stats.ts` for the pattern).
+> notes below and `src/modules/claude-history.ts` for the pattern).
 
 ```sh
 # Draw scrolling green text on the front display for 20s
@@ -244,7 +244,7 @@ makes playback position readable; flame frames were then matched byte-exact):
 
 **Static screens as sections — three interacting quirks** (all verified on firmware
 1.1.1, 2026-08-09, with a red/green/blue solid-frame probe; the pattern lives in
-`src/modules/claude-stats.ts`):
+`src/modules/claude-history.ts`):
 
 - **A looping one-display-frame section is not honoured.** `loop: true` on a section
   spanning a single display frame plays through the rest of the file and settles on the
