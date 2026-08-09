@@ -1,5 +1,6 @@
 {
   "name": "millibar",
+  "license": "MIT",
   "bin": {
     "mbar": "./src/mbar.ts",
     "bbar": "./tools/bbar.ts"
