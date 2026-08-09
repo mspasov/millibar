@@ -1,9 +1,12 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { COLORS, HIDDEN, scaleRgb } from '../display';
 import type { ModuleContext } from '../module';
-import { RateLimitError, type Usage } from '../usage';
+import { loadCachedUsage, RateLimitError, type Usage } from '../usage';
 import { claudeDashModule } from './claude-dash';
 import type { LimitModuleOptions } from './limit-poller';
+import { tempDirs } from '../test-util';
 
 const usageFixture = (over: Partial<Usage> = {}): Usage => ({
   fiveHour: { utilization: 62, resetsAt: new Date(Date.now() + 2 * 3_600_000).toISOString() },
@@ -193,5 +196,26 @@ describe('quiet mode', () => {
     );
     expect(await module.poll()).toEqual({ nextPollMs: 900_000, holdRefreshMs: 900_000 });
     expect(logs).toEqual([]);
+  });
+});
+
+describe('cache persistence', () => {
+  const { tempDir, cleanup } = tempDirs('mbar-dash-');
+  afterEach(cleanup);
+
+  test('persist: false seeds from the cache but never writes it', async () => {
+    const path = join(tempDir(), 'usage.json');
+    const secondary = makeModule(async () => usageFixture(), { cachePath: path, persist: false });
+    await secondary.poll();
+    // The twin gauge poller shares this path; the secondary must not double-write.
+    expect(existsSync(path)).toBe(false);
+
+    const primary = makeModule(async () => usageFixture(), { cachePath: path });
+    await primary.poll();
+    expect(loadCachedUsage(path)).not.toBeNull();
+
+    // Seeding still works without persistence: render before any poll.
+    const seeded = makeModule(async () => usageFixture(), { cachePath: path, persist: false });
+    expect(seeded.render({ refreshing: false }).length).toBeGreaterThan(0);
   });
 });

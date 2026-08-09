@@ -122,6 +122,10 @@ export interface LimitModuleOptions {
    * unreachable or rate-limited API starts from the previous values instead
    * of a blank screen. Null disables persistence (tests). */
   cachePath?: string | null;
+  /** false: seed from the cache but never write it. For the secondary of a
+   * shared-fetch pair — the twin polls dedupe into one request, but each
+   * poller used to persist the identical result to the same path. */
+  persist?: boolean;
   /** Injectable for tests, and how the modules share one deduplicated fetch. */
   fetchUsageImpl?: typeof fetchUsage;
   /** Skip the routine log lines (cache seed, summary, back-off, recovery) and
@@ -191,7 +195,7 @@ export class LimitPoller {
       this.stale = false;
       this.rateLimitStreak = 0;
       this.onData(previousScreens);
-      if (this.cachePath) await saveCachedUsage(usage, this.cachePath);
+      if (this.cachePath && (this.options.persist ?? true)) await saveCachedUsage(usage, this.cachePath);
 
       if (this.failedPolls > 0) {
         if (!quiet) {

@@ -106,8 +106,8 @@ const sweepOptions = ANIMATIONS ? {} : { sweepMs: 0, sweepCoolMs: 0 };
 // that one request per cycle against the rate-limited endpoint. The 30s TTL
 // covers the near-simultaneous twin polls (and puts a freshness floor under
 // START-refreshes) without holding data back longer than anyone would notice
-// at 1% granularity. The dashboard module is quiet — the gauge logs each
-// fetch's story once.
+// at 1% granularity. The dashboard module is quiet and doesn't persist — the
+// gauge logs each fetch's story and writes the shared usage cache once.
 const usageOptions = {
   pollIntervalMs: POLL_INTERVAL_MS,
   refreshCooldownMs: REFRESH_COOLDOWN_MS,
@@ -121,7 +121,7 @@ const usageOptions = {
 // so a deselected module does no polling and no setup.
 const roster = [
   { aliases: ['gauge', 'claude-gauge'], value: () => claudeGaugeModule(usageOptions) },
-  { aliases: ['dash', 'claude-dash'], value: () => claudeDashModule({ ...usageOptions, quiet: true }) },
+  { aliases: ['dash', 'claude-dash'], value: () => claudeDashModule({ ...usageOptions, quiet: true, persist: false }) },
   { aliases: ['history', 'claude-history'], value: () => claudeHistoryModule({ intros: ANIMATIONS }) },
   { aliases: ['cpu'], value: () => cpuModule(sweepOptions) },
 ];
