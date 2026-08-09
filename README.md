@@ -109,6 +109,7 @@ All via environment variables; every one has a working default.
 | `REFRESH_COOLDOWN_MS` | `5000` | monitor — floor between button-triggered fetches |
 | `BUSY_PRIORITY` | `50` | monitor — draw priority, 1–100 |
 | `SWITCH_BUTTON` | `OK` | monitor — which button event the dial press reports as (`OK`\|`BACK`\|`START`) |
+| `MBAR_MODULES` | unset (all) | monitor — which modules run and their cycle order, comma-separated (`gauge,dash,history,cpu`); the first named is the startup module. Same as `mbar --modules` (the flag wins) |
 | `ANIMATIONS` | `on` | monitor — `off` stills everything that moves: value changes snap instead of sweeping, and the history screens appear without their intros. Same as `mbar --no-animations` (the flag wins) |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | usage — where credentials are read from off-macOS |
 
@@ -196,6 +197,9 @@ device actually sustains.
   countdown while fetching and the status light fades. During cooldown a press still
   repaints (without refetching), so a blank screen is always recoverable — every button
   press ends in a repaint.
+- **Press `BACK` twice within 5 s to quit** from the device: the first press paints an
+  `AGAIN = QUIT` prompt over a draining time bar, the second plays the firmware's own
+  turn-off animation and exits cleanly. Any other input dismisses the prompt.
 - A failed update blinks the status light **red, once** (preempting the cyan fetch
   fade), and the shown values dim to stale grey until a fetch succeeds. A rate-limit
   back-off (429) skips the blink — it's routine, and would otherwise recur every
@@ -203,6 +207,11 @@ device actually sustains.
 - The last successful usage read is cached in `~/.cache/mbar/usage.json`, so a restart
   while the API is unreachable or rate-limited starts from the previous values — grey
   with a `?` on the label, like any stale data — until a live fetch replaces them.
+- **Moving the mode switch off `OFF`** silences the monitor — no repaints, no
+  status-light frames, no button or encoder handling — because the system screens own
+  the display there. Back on `OFF`, it repaints once the device's power-down animation
+  has finished (~1.2 s). The switch position can't be read at startup, so a monitor
+  launched with the switch already away draws until the first flip it sees.
 - Draws carry a 90-second timeout, refreshed by a once-a-minute heartbeat repaint (which
   also keeps countdowns ticking), so the display **self-clears within ~90 s if the
   process dies**. Ctrl-C clears it explicitly.

@@ -105,8 +105,9 @@ const bar = new BusyBar({ addr: '10.0.4.20' }); // default addr if omitted
 const status = await bar.SystemStatusGet();
 ```
 
-Official docs: <https://docs.busy.app/bar/dev/http-api> (blocks unauthenticated scripted
-fetches — prefer the device-served `openapi.yaml`).
+Official docs: <https://docs.busy.app/bar/dev/http-api> (403s scripted fetches but
+answers a browser `User-Agent`; the device-served `openapi.yaml` is still the primary
+reference).
 
 ## HTTP API highlights
 
@@ -189,6 +190,12 @@ curl -X POST http://10.0.4.20/api/display/draw \
 # Clear everything drawn by an app
 curl -X DELETE "http://10.0.4.20/api/display/draw?application_name=my_app"
 ```
+
+Draw-rate ceiling: ~33 fps sustained was measured against a *localhost echo server*
+(client-side cost only); the rate real hardware sustains has not been pinned down —
+`tools/sweep.ts` reports it live for the monitor's sweeps. Two capabilities considered
+during design remain unverified on-device: gradient/multi-segment fills, and masking by
+drawing black rectangles over content.
 
 #### Font metrics (measured)
 
@@ -323,6 +330,19 @@ makes playback position readable; flame frames were then matched byte-exact):
   on a frame boundary, so 1 fps lags a section change by up to a second while 30 fps
   makes it ~33 ms.
 
+Two more restart-on-redraw consequences, both with working patterns in-repo:
+
+- **A keepalive redraw restarts the playing section.** Element `timeout` forces periodic
+  redraws to keep a long-running animation alive, and each one visibly restarts the loop
+  unless it re-enters phase-matched like a switch — `tools/flame.ts` (90 s timeout, 30 s
+  keepalive) does this. Inside a monitor module the same applies to any host repaint (the
+  heartbeat, a completing poll) that lands mid-intro: the intro restarts once.
+- **Handing an intro animation off to a static section without a visible cut**: end the
+  intro on a ~1 s hold of a frame byte-identical to the static section's, and redraw onto
+  the static section *inside* that hold — the switch lands on identical pixels
+  (`src/modules/claude-history.ts`; a test asserts the intro's final frame stays
+  byte-equal to the chart painter's output so the two cannot drift apart).
+
 Text and rectangle elements drawn after an animation element composite over it — a
 pixel-buffer chart can carry ordinary text labels on top.
 
@@ -391,6 +411,10 @@ all frames accepted). Two things matter for it to look right:
 Each frame needs a non-empty `elements` array; a 1×1 fully transparent rectangle works,
 since elements merge by id and leave the screen untouched. A draw that *omits*
 `led_notification_color` does not disturb a running light, so normal redraws are safe.
+
+**One driver at a time.** Two concurrent pulses interleave their frames — both colours
+flicker, and the loser's cleanup "off" frame lands mid-blink of the winner. Abort the
+running pulse and chain the new one behind the old one's cleanup (`src/host.ts`).
 
 ```sh
 bun run src/led.ts pulse "#00CCFF" 1400 2                 # colour, duration ms, cycles
@@ -603,7 +627,10 @@ Layout worth knowing: `/ext/user_assets/<application_name>/` is where
 holds the stock assets that `stock_path` resolves against. Uploaded assets
 persist forever — nothing cleans up after a deleted script, so `bbar apps` /
 `bbar wipe <app>` exist. `DELETE /api/assets/upload?application_name=…`
-removes the app's asset *directory itself*, not just its contents.
+removes the app's asset *directory itself*, not just its contents. The same
+applies to renames: a module that renames its uploaded asset orphans the old
+file — delete it in the same change (an orphaned `mbar-stats.anim` sat on the
+device for days after the history module's rename).
 
 ## Live test performed (2026-08-06)
 
@@ -656,5 +683,13 @@ reads, see [USAGE-API.md](USAGE-API.md).
   The field *is* part of its own `DisplayDrawParams` type, so this type-checks and
   compiles cleanly while the status light never fires. `src/display.ts` posts draws
   with `fetch` instead (keeping the library's types) — see `displayDraw()` there.
-  Worth checking whether other namespaces narrow their bodies the same way; verify with
-  a local echo server rather than trusting the types.
+  Checked the other namespaces used here: `Storage*` (`dist/BusyBar/api/storage.js`)
+  and `AudioPlay` pass path, query, and body through faithfully — `DisplayDraw` is the
+  only known offender. Still verify a new namespace with a local echo server rather
+  than trusting the types.
+
+- **Upgrade surface is small.** This repo touches only the `BusyBar` constructor
+  (src/connection.ts) and the `DisplayDrawParams` type (src/display.ts), so a busy-lib
+  bump is usually a package.json-only change. 0.18.0 removed the
+  `setApiKey`/`setHTTPAccessPassword` setters; the constructor still accepts
+  `HTTPAccessPassword`.

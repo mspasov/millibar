@@ -104,6 +104,10 @@ Parsing notes, each of which has broken a real implementation:
   (`tangelo`, `iguana_necktie`, `nimbus_quill`, `cinder_cove`, `amber_ladder`,
   `omelette_promotional`, …) that come and go.
 - **Money is in minor units.** `monthly_limit: 17000` with `decimal_places: 2` is €170.00.
+- **There is no window-start field.** The monitor derives the 5-hour window's start as
+  `resets_at − 5h` (the window opens at the session's first activity, so this holds by
+  construction) — but if the API ever reports a shorter effective window, a pace marker
+  derived this way drifts optimistic. Unverified against a real session boundary.
 
 ## Rate limiting
 
@@ -119,6 +123,13 @@ uses, and this monitor's original default — drew regular 429s in day-to-day us
 endpoint. The monitor now polls every 10 minutes and doubles its wait on consecutive
 429s (capped at 4× the interval), which is a better fit for a shared budget than
 retrying at full cadence the moment one Retry-After expires.
+
+In-process, every consumer must share one deduplicated fetcher: `dedupedFetchUsage()`
+(`src/usage.ts`, wired in `src/mbar.ts` with a 30 s TTL). Two modules polling
+independently double the load on a per-account budget for identical data — and the
+deduper caches *errors* too, so a sibling module cannot immediately re-provoke a 429
+the first one just backed off from. A new usage-reading module goes through it, not
+through `fetchUsage()` directly.
 
 ## Example
 
