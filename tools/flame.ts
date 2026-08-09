@@ -23,9 +23,9 @@
  *
  * Env: BUSY_BAR_ADDR, BUSY_PRIORITY
  */
-import { BusyBar } from '@busy-app/busy-lib';
 import { encodeAnim, type AnimSection } from '../src/anim';
-import { deviceAddr, envNumber, httpBase } from '../src/config';
+import { envNumber } from '../src/config';
+import { connectedBar, describeConnection, deviceFetch, resolveConnection } from '../src/connection';
 import { DISPLAYS } from '../src/display';
 import { listenInput } from '../src/input';
 import { encodePng } from '../src/png';
@@ -54,8 +54,6 @@ const PHASE_LEAD = 3;
 const APP_NAME = 'claude_flame';
 const FILE_NAME = 'flame.anim';
 const PRIORITY = envNumber('BUSY_PRIORITY', 50, 1);
-const ADDR = deviceAddr();
-const BASE_URL = httpBase();
 
 /** Redraws refresh this; the display self-clears if the process dies. */
 const DRAW_TIMEOUT_S = 90;
@@ -270,7 +268,7 @@ async function main() {
   const anim = encodeAnim(frames, { width: WIDTH, height: HEIGHT, fps: FPS, sections });
   console.log(`Encoded ${FILE_NAME}: ${(anim.length / 1024).toFixed(0)} KiB, ${sections.length + 1} sections`);
 
-  const bar = new BusyBar({ addr: ADDR });
+  const bar = await connectedBar();
   await bar.AssetsUpload(
     { application_name: APP_NAME, file: FILE_NAME, data: new Blob([anim.buffer as ArrayBuffer]) },
     { timeout: 120_000 }
@@ -312,7 +310,7 @@ async function main() {
    * shows something else (display stolen, blanked, mid-switch transient). */
   async function capturePhase(level: number): Promise<number | null> {
     try {
-      const r = await fetch(`${BASE_URL}/api/screen?display=0`, {
+      const r = await deviceFetch('/api/screen?display=0', {
         signal: AbortSignal.timeout(2000),
       });
       if (!r.ok) return null;
@@ -368,7 +366,7 @@ async function main() {
 
   await stepTowards();
   console.log(
-    `Flame at level ${targetLevel}/${MAX_LEVEL} on ${ADDR} — ` +
+    `Flame at level ${targetLevel}/${MAX_LEVEL} via ${describeConnection(await resolveConnection())} — ` +
       'rotate the dial to change it (Ctrl-C to stop and clear)'
   );
 

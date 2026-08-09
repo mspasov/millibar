@@ -17,7 +17,8 @@
  * Usage: bun run src/input.ts
  */
 
-import { deviceAddr, wsBase } from './config';
+import { wsBase } from './config';
+import { describeConnection, invalidateConnection, resolveConnection, wsUrl } from './connection';
 import { clockTime } from './log';
 
 const BUTTONS = ['OK', 'BACK', 'START'] as const;
@@ -165,36 +166,54 @@ export async function listenInput(
   onEvent: (event: InputEvent) => void,
   options: ListenOptions = {}
 ): Promise<void> {
-  // wsBase: BUSY_BAR_ADDR may be a full http(s) URL, which must map to
-  // ws(s)://, not be glued after "ws://".
-  const base = wsBase(options.addr);
   const { signal, onError, onConnect } = options;
+  // An explicit addr keeps the old contract — talk to exactly this address,
+  // no config file, no probing. wsBase because it may be a full http(s) URL,
+  // which must map to ws(s)://, not be glued after "ws://".
+  const explicitBase = options.addr ? wsBase(options.addr) : undefined;
 
   while (!signal?.aborted) {
-    await new Promise<void>((resolve) => {
-      const ws = new WebSocket(`${base}/api/status/ws`);
-      ws.binaryType = 'arraybuffer';
-      const close = () => ws.close();
-      signal?.addEventListener('abort', close, { once: true });
+    // Re-resolved on every attempt: after a drop the winning route may have
+    // changed (USB unplugged mid-run → lan), and a resolve failure just means
+    // the device is off — back off and keep trying, like any disconnect.
+    const url = explicitBase
+      ? `${explicitBase}/api/status/ws`
+      : await wsUrl('/api/status/ws').catch((error: Error) => {
+          onError?.(error);
+          return undefined;
+        });
 
-      const finish = () => {
-        signal?.removeEventListener('abort', close);
-        resolve();
-      };
+    if (url !== undefined) {
+      // The query string may carry x-api-token — never put it in an error.
+      const target = url.split('?')[0]!;
+      await new Promise<void>((resolve) => {
+        const ws = new WebSocket(url);
+        ws.binaryType = 'arraybuffer';
+        const close = () => ws.close();
+        signal?.addEventListener('abort', close, { once: true });
 
-      ws.onopen = () => {
-        onConnect?.();
-        ws.send(JSON.stringify({ enable: true }));
-      };
-      ws.onmessage = (event) => {
-        if (typeof event.data === 'string') return;
-        for (const input of decodeInputEvents(new Uint8Array(event.data as ArrayBuffer))) {
-          onEvent(input);
-        }
-      };
-      ws.onerror = () => onError?.(new Error(`state stream connection to ${base} failed`));
-      ws.onclose = finish;
-    });
+        const finish = () => {
+          signal?.removeEventListener('abort', close);
+          resolve();
+        };
+
+        ws.onopen = () => {
+          onConnect?.();
+          ws.send(JSON.stringify({ enable: true }));
+        };
+        ws.onmessage = (event) => {
+          if (typeof event.data === 'string') return;
+          for (const input of decodeInputEvents(new Uint8Array(event.data as ArrayBuffer))) {
+            onEvent(input);
+          }
+        };
+        ws.onerror = () => {
+          if (!explicitBase) invalidateConnection();
+          onError?.(new Error(`state stream connection to ${target} failed`));
+        };
+        ws.onclose = finish;
+      });
+    }
 
     if (signal?.aborted) break;
     await Bun.sleep(2000); // back off before reconnecting
@@ -216,8 +235,9 @@ if (import.meta.main) {
     process.exit(0);
   });
 
+  const conn = await resolveConnection();
   console.log(
-    `Listening for input on ${deviceAddr()} — ` +
+    `Listening for input on ${describeConnection(conn)} — ` +
       'press buttons, turn the dial, or move the switch (Ctrl-C to stop)'
   );
   await listenInput(

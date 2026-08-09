@@ -14,8 +14,7 @@
  * Usage: bun run tools/click.ts          # click on every dial movement
  *        bun run tools/click.ts --once   # play a single click and exit
  */
-import { BusyBar } from '@busy-app/busy-lib';
-import { deviceAddr } from '../src/config';
+import { connectedBar } from '../src/connection';
 import { listenInput } from '../src/input';
 import { SAMPLE_RATE, pcm16 } from '../src/snd';
 
@@ -39,7 +38,7 @@ function synthesizeClick(): Int16Array {
   return pcm16(samples);
 }
 
-const bar = new BusyBar({ addr: deviceAddr() });
+const bar = await connectedBar();
 
 const pcm = synthesizeClick();
 await bar.AssetsUpload(

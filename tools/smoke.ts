@@ -1,8 +1,9 @@
-import { BusyBar } from '@busy-app/busy-lib';
-import { deviceAddr } from '../src/config';
+import { connectedBar, describeConnection, resolveConnection } from '../src/connection';
 
-const bar = new BusyBar({ addr: deviceAddr() });
+const conn = await resolveConnection();
+console.log(`Route: ${describeConnection(conn)}`);
 
+const bar = await connectedBar();
 const { device, firmware, power, system } = await bar.SystemStatusGet();
 console.log(
   `Connected to ${device?.otp_model} (fw ${firmware?.version}), ` +

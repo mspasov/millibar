@@ -22,6 +22,30 @@ timer, and supports custom apps. It is controllable over HTTP, MQTT, and BLE.
 - No HTTP access password is currently configured; the local API is unauthenticated.
   (Can be enabled in the web UI under Settings → HTTP Access.)
 
+### Authentication
+
+Two independent credential kinds (both optional; from busy-lib source and README):
+
+- **HTTP Access Password** (local routes): sent as an `X-API-Token` **header** on HTTP
+  requests; WebSockets can't carry headers, so there it becomes an `x-api-token` **query
+  parameter** (busy-lib `LocalStateStream` uses `HTTPAccessPassword ?? token` for it).
+  Untested on hardware — this device has no password configured.
+- **Cloud API token** (the `https://api.busy.app` proxy): `Authorization: Bearer <token>`,
+  issued at <https://cloud.busy.app/api-tokens>. The proxy serves the same `/api/*` paths
+  as the device, so a client only swaps the base URL. Observed 2026-08-09: an *invalid*
+  token gets `HTTP 404` from `https://api.busy.app/api/version`, not 401 — the proxy
+  appears to route token → device and treats an unknown token as "no such device".
+  End-to-end proxy access is unverified here (no real token on this machine).
+- The remote **state stream** is not the local one behind a different base URL: busy-lib's
+  `RemoteStateStream` speaks JSON (not protobuf), subscribes per device GUID
+  (`{type: "SUBSCRIBE", guid}`), and refreshes tokens on expiry. This repo's raw protobuf
+  input listener (`src/input.ts`) therefore only works on local routes.
+
+This repo resolves routes (USB → LAN → cloud, with per-route credentials) through
+`src/connection.ts`, persisted in `~/.config/mbar/config.json` — see README
+“Connecting to the device”. A probe is `GET /api/version` requiring `api_semver` in the
+reply, which also filters out captive portals answering 200 to everything.
+
 ## This device
 
 | Field | Value |

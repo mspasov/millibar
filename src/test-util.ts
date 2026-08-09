@@ -17,12 +17,19 @@ export interface CapturedRequest {
 }
 
 const realFetch = globalThis.fetch;
+let savedAddr: string | undefined;
 
 /** Replace global fetch with a capturing stub; returns the (live) call list.
  * Pair with `afterEach(restoreFetch)`. */
 export function stubFetch(
   respond: (captured: CapturedRequest) => Response = () => new Response('{}')
 ): CapturedRequest[] {
+  // The stub IS the device: point the connection resolver's env override at
+  // it, so device calls go straight through the stub instead of probing the
+  // configured routes — which would fail on the stub's canned reply (no
+  // api_semver) or, without the stub, leak requests to the real device.
+  savedAddr = process.env.BUSY_BAR_ADDR;
+  process.env.BUSY_BAR_ADDR = 'stub.device';
   const calls: CapturedRequest[] = [];
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const captured: CapturedRequest = {
@@ -38,6 +45,8 @@ export function stubFetch(
 
 export function restoreFetch(): void {
   globalThis.fetch = realFetch;
+  if (savedAddr === undefined) delete process.env.BUSY_BAR_ADDR;
+  else process.env.BUSY_BAR_ADDR = savedAddr;
 }
 
 /** mkdtemp directories that one `afterEach(cleanup)` removes. */

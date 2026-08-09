@@ -32,7 +32,7 @@ import {
   type StorageEntry,
 } from '../src/store';
 
-const USAGE = `bbar — BUSY Bar CLI (BUSY_BAR_ADDR to pick the device)
+const USAGE = `bbar — BUSY Bar CLI (routes from ~/.config/mbar/config.json; BUSY_BAR_ADDR overrides)
 
 Storage & assets:
 

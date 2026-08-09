@@ -4,9 +4,8 @@
  *
  * Usage: bun run tools/plasma.ts [seconds]
  */
-import { BusyBar } from '@busy-app/busy-lib';
 import { encodeAnim } from '../src/anim';
-import { deviceAddr } from '../src/config';
+import { connectedBar } from '../src/connection';
 import { DISPLAYS } from '../src/display';
 
 const WIDTH = DISPLAYS.front.width;
@@ -61,7 +60,7 @@ function generateFrames(): Uint8Array[] {
   return frames;
 }
 
-const bar = new BusyBar({ addr: deviceAddr() });
+const bar = await connectedBar();
 
 console.log(`Generating ${FRAME_COUNT} frames of ${WIDTH}x${HEIGHT} plasma...`);
 const anim = encodeAnim(generateFrames(), { width: WIDTH, height: HEIGHT, fps: FPS });

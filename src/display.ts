@@ -10,7 +10,7 @@
  * callers that simply stop drawing an element.
  */
 import type { DisplayDrawParams } from '@busy-app/busy-lib';
-import { httpBase } from './config';
+import { deviceFetch } from './connection';
 
 export type DrawElement = DisplayDrawParams['elements'][number];
 
@@ -31,7 +31,7 @@ export const DISPLAYS = {
  * identical, so this just sends the body as written.
  */
 export async function displayDraw(body: DisplayDrawParams): Promise<void> {
-  const response = await fetch(`${httpBase()}/api/display/draw`, {
+  const response = await deviceFetch('/api/display/draw', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -45,8 +45,8 @@ export async function displayDraw(body: DisplayDrawParams): Promise<void> {
 /** Clears every element the application has on the display. The screen stays
  * blank until someone draws again — nothing reverts on its own. */
 export async function displayClear(applicationName: string): Promise<void> {
-  const response = await fetch(
-    `${httpBase()}/api/display/draw?application_name=${encodeURIComponent(applicationName)}`,
+  const response = await deviceFetch(
+    `/api/display/draw?application_name=${encodeURIComponent(applicationName)}`,
     { method: 'DELETE', signal: AbortSignal.timeout(5000) }
   );
   if (!response.ok) {

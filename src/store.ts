@@ -19,7 +19,7 @@
  * - `mkdir` returns 400 when the directory already exists.
  */
 
-import { httpBase } from './config';
+import { deviceFetch } from './connection';
 
 export const EXT_ROOT = '/ext';
 export const USER_ASSETS = '/ext/user_assets';
@@ -58,7 +58,7 @@ async function request(
   timeoutMs = TIMEOUT_MS
 ): Promise<Response> {
   const qs = new URLSearchParams(query).toString();
-  const response = await fetch(`${httpBase()}/api${endpoint}?${qs}`, {
+  const response = await deviceFetch(`/api${endpoint}?${qs}`, {
     method,
     body,
     headers: body === undefined ? undefined : { 'Content-Type': 'application/octet-stream' },

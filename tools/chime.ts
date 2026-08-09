@@ -9,8 +9,7 @@
  * Usage: bun run tools/chime.ts [note-frequencies-hz...]
  *   e.g. bun run tools/chime.ts 523.25 659.25 783.99
  */
-import { BusyBar } from '@busy-app/busy-lib';
-import { deviceAddr } from '../src/config';
+import { connectedBar } from '../src/connection';
 import { SAMPLE_RATE, pcm16 } from '../src/snd';
 
 const APP_NAME = 'claude_sound';
@@ -47,7 +46,7 @@ function synthesizeChime(frequencies: number[]): Float64Array {
   return samples;
 }
 
-const bar = new BusyBar({ addr: deviceAddr() });
+const bar = await connectedBar();
 
 const pcm = pcm16(synthesizeChime(freqs));
 console.log(

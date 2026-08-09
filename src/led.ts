@@ -25,6 +25,7 @@
  */
 
 import { httpBase } from './config';
+import { deviceFetch } from './connection';
 
 type Rgb = [number, number, number];
 
@@ -179,7 +180,8 @@ const FILLER_ELEMENT = {
 };
 
 function createSender(options: TransportOptions) {
-  const baseUrl = httpBase(options.addr);
+  // An explicit addr bypasses the connection config, like everywhere else.
+  const explicitBase = options.addr ? httpBase(options.addr) : undefined;
   const applicationName = options.applicationName ?? 'claude_usage';
   const priority = options.priority ?? 50;
 
@@ -189,20 +191,22 @@ function createSender(options: TransportOptions) {
    * cleanup frame passes no signal: an aborted pulse must still turn the
    * light off. */
   return async function send(ledColor: string, signal?: AbortSignal): Promise<void> {
+    const init: RequestInit = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        application_name: applicationName,
+        priority,
+        led_notification_color: ledColor,
+        elements: [FILLER_ELEMENT],
+      }),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(2000)])
+        : AbortSignal.timeout(2000),
+    };
     try {
-      await fetch(`${baseUrl}/api/display/draw`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          application_name: applicationName,
-          priority,
-          led_notification_color: ledColor,
-          elements: [FILLER_ELEMENT],
-        }),
-        signal: signal
-          ? AbortSignal.any([signal, AbortSignal.timeout(2000)])
-          : AbortSignal.timeout(2000),
-      });
+      if (explicitBase) await fetch(`${explicitBase}/api/display/draw`, init);
+      else await deviceFetch('/api/display/draw', init);
     } catch {
       // A dropped frame just makes the animation slightly coarser; never let it
       // interrupt the caller.

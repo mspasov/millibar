@@ -23,7 +23,8 @@
  * with BUSY_PRIORITY=51 to draw over it. Exiting clears this app's elements;
  * mbar will not repaint on its own until a button press or its next heartbeat.
  */
-import { deviceAddr, envNumber } from '../src/config';
+import { envNumber } from '../src/config';
+import { describeConnection, resolveConnection } from '../src/connection';
 import {
   COLORS,
   DISPLAYS,
@@ -55,7 +56,6 @@ const PAUSE_MS = 700;
 const WHITE = '#FFFFFFFF';
 const APP_NAME = 'sweep_test';
 const PRIORITY = envNumber('BUSY_PRIORITY', 50, 1);
-const ADDR = deviceAddr();
 /** Refreshed by every draw; the screen self-clears if the process dies. */
 const DRAW_TIMEOUT_S = 60;
 const KEEPALIVE_MS = 20_000;
@@ -188,7 +188,9 @@ async function main() {
     });
   }
 
-  console.log(`sweep test on ${ADDR} — duration ${durationMs}ms, tick ${TICK_MS}ms`);
+  console.log(
+    `sweep test via ${describeConnection(await resolveConnection())} — duration ${durationMs}ms, tick ${TICK_MS}ms`
+  );
   await session.draw(frame(shown.pct, shown.color, HIDDEN(WHITE)));
 
   if (targets.length > 0) {

@@ -8,7 +8,8 @@
  * and every button press ends in a repaint so a screen blanked by BACK (or
  * overdrawn by another app) is always recoverable.
  */
-import { deviceAddr, envNumber } from './config';
+import { envNumber } from './config';
+import { describeConnection, resolveConnection } from './connection';
 import { DisplaySession } from './display';
 import { listenInput, type Button, type InputEvent } from './input';
 import { pulseLed, type PulseShape } from './led';
@@ -16,7 +17,6 @@ import { log, logError, logResolved } from './log';
 import { ModuleRunner, wrapIndex, type MonitorModule } from './module';
 
 const BUTTONS: readonly Button[] = ['OK', 'BACK', 'START'];
-const ADDR = deviceAddr();
 
 /** Domain errors (NoCredentialsError, …) set a custom `name` and carry their
  * advice in the message; an error still wearing a built-in name is a bug,
@@ -115,11 +115,18 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
       .catch((e) => logError('led', (e as Error).message));
   }
 
+  // A dead device at startup is not fatal: every draw and the input stream
+  // re-resolve on their own, so the monitor comes up and waits for it.
+  const conn = await resolveConnection().catch((error) => {
+    logError('host', (error as Error).message);
+    return undefined;
+  });
+
   // Before init: modules may log from init (e.g. the cached-usage seed), and
   // the banner is the session-start marker those lines should follow.
   log(
     'host',
-    `millibar: ${modules.map((m) => m.title).join(', ')} on ${ADDR} — ` +
+    `millibar: ${modules.map((m) => m.title).join(', ')} via ${conn ? describeConnection(conn) : 'no reachable route yet — still probing'} — ` +
       `press ${switchButton} (the dial) for the next module, START to refresh, ` +
       'rotate the encoder to cycle views (Ctrl-C to stop and clear)'
   );
