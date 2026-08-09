@@ -7,7 +7,9 @@
  * the active module, rotating the encoder is forwarded to the active module,
  * and BACK twice within 5 s quits (the first press paints a confirm prompt).
  * Every press still ends in a draw, so a screen blanked by BACK or overdrawn
- * by another app is always recoverable.
+ * by another app is always recoverable. Moving the selector switch away from
+ * OFF pauses all drawing (and input handling) until it returns — the system
+ * screens own the display there, and our draws would land on top of them.
  */
 import { envNumber } from './config';
 import { describeConnection, resolveConnection } from './connection';
@@ -19,6 +21,13 @@ import { ModuleRunner, wrapIndex, type MonitorModule } from './module';
 import { BACK_SETTLE_MS, QuitConfirm, TURN_OFF_HOLD_MS, ensureTurnOffAsset, turnOffElement } from './quit-confirm';
 
 const BUTTONS: readonly Button[] = ['OK', 'BACK', 'START'];
+
+/** Flipping the switch back to OFF plays the firmware's power-down animation:
+ * blank ~130 ms after the event, one ~667 ms pass, dark by ~750 ms (measured
+ * via /api/screen, firmware 1.1.1). Resuming before it finishes would overdraw
+ * the power-down — and could itself be wiped by its later frames; the margin
+ * covers the same load-dependent start lag as TURN_OFF_HOLD_MS. */
+const SWITCH_RESUME_MS = 1200;
 
 /** Domain errors (NoCredentialsError, …) set a custom `name` and carry their
  * advice in the message; an error still wearing a built-in name is a bug,
@@ -69,6 +78,16 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
   let activeIndex = 0;
   const active = () => runners[activeIndex]!;
 
+  /** True from a switch-away event until SWITCH_RESUME_MS after the switch
+   * returns to OFF. Away from OFF the system owns the screen — the apps and
+   * settings menus run at priority 10, under our default 50, so any draw of
+   * ours (a repaint, or an LED pulse's filler frame) lands on top of them.
+   * Change-events are all we get: the state stream carries no initial
+   * position, so a monitor started with the switch already away still draws
+   * until the first flip. */
+  let switchedAway = false;
+  let switchResume: ReturnType<typeof setTimeout> | null = null;
+
   function drawFrame(elements: DrawElement[]): void {
     void session.draw(elements).then(
       // A success closes any open draw incident — during a device outage the
@@ -82,8 +101,9 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
   function repaint(): void {
     // The quit prompt owns the screen while armed: a poll finishing (or the
     // heartbeat firing) mid-window must not overdraw it. Expiry repaints
-    // after disarming, so the suppression cannot outlive the window.
-    if (quit.armed) return;
+    // after disarming, so the suppression cannot outlive the window. The
+    // same gate covers the switch: away from OFF the screen is the system's.
+    if (quit.armed || switchedAway) return;
     const runner = active();
     const module = runner.module;
     const elements = module
@@ -116,6 +136,9 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
   let ledAbort: AbortController | null = null;
   let ledChain = Promise.resolve();
   function pulseStatusLight(color: string, shape?: PulseShape, stillWanted: () => boolean = () => true): void {
+    // Every pulse frame is a display draw (the LED colour rides on a filler
+    // element), so pulses would steal the screen from a system menu too.
+    if (switchedAway) return;
     ledAbort?.abort();
     const abort = new AbortController();
     ledAbort = abort;
@@ -166,6 +189,28 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
   });
 
   function handleInput(event: InputEvent): void {
+    if (event.type === 'switch') {
+      if (switchResume) clearTimeout(switchResume);
+      switchResume = null;
+      if (event.position !== 'OFF') {
+        if (!switchedAway) log('host', `switch -> ${event.position}: system screen up, drawing paused until OFF`);
+        switchedAway = true;
+        // A mid-flight pulse would keep posting draw frames under the menu.
+        ledAbort?.abort();
+        quit.disarm();
+      } else if (switchedAway) {
+        log('host', 'switch -> OFF: resuming once the power-down finishes');
+        switchResume = setTimeout(() => {
+          switchResume = null;
+          switchedAway = false;
+          repaint();
+        }, SWITCH_RESUME_MS);
+      }
+      return;
+    }
+    // Buttons and the encoder drive the system screens while the switch is
+    // away — reacting (every press ends in a draw) would fight them.
+    if (switchedAway) return;
     if (event.type === 'button') {
       // RELEASE would fire a second time for the same press.
       if (event.action !== 'PRESS') return;
@@ -211,9 +256,12 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
   }, heartbeatMs);
   controller.signal.addEventListener('abort', () => {
     clearInterval(heartbeat);
-    // Also stops the quit ticker: a drain frame drawn after the shutdown
-    // clear would re-register the application on the device.
+    // Also stops the quit ticker and any pending switch-resume repaint: a
+    // frame drawn after the shutdown clear would re-register the application
+    // on the device.
     quit.disarm();
+    if (switchResume) clearTimeout(switchResume);
+    switchResume = null;
   });
 
   // Synced in the background at startup so a quit can play it immediately;

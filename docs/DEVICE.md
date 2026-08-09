@@ -460,7 +460,23 @@ The `up`/`down` keys map to encoder deltas of +1/−1, and `busy`/`custom`/`off`
 > *start a BUSY timer* — observed repeatedly, though not in every device state, so treat
 > any injected button as potentially state-changing rather than assuming a rule. Stop a
 > running timer by PUTting a `NOT_STARTED` snapshot (`snapshot_timestamp_ms` is required,
-> or you get `{"error":"Failed to parse snapshot"}`).
+> or you get `{"error":"Failed to parse snapshot"}`). Injected switch keys are no
+> exception: `key=apps` genuinely opened the apps menu (visible on `/api/screen` ~400 ms
+> after the event), leaving firmware mode and physical slider disagreeing until `key=off`
+> realigned them.
+
+Switch-position facts, all measured on firmware 1.1.1:
+
+- **The current position is not readable.** The state stream sends nothing on connect —
+  only changes — and `/api/status` has no position field. A client learns the position
+  at its first switch *event* and not before.
+- **Returning to OFF plays the firmware's power-down animation**: blank ~130 ms after
+  the OFF event, then one ~667 ms turn-off pass, dark by ~750 ms. A draw fired on the
+  OFF event overdraws the power-down mid-play — and can itself be wiped by its later
+  frames. The monitor waits `SWITCH_RESUME_MS` (src/host.ts) before resuming.
+- The apps/settings menus accept ordinary priority-50 draws on top of themselves (they
+  run at the built-ins' priority 10), which is why the monitor stops drawing entirely —
+  repaints and LED pulse frames alike — while the switch is away from OFF.
 
 ### Display priority and the BACK button
 
