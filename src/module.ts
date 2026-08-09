@@ -154,10 +154,13 @@ export class ModuleRunner {
       const result = await this.module.poll();
       this.holdUntil = Date.now() + result.holdRefreshMs;
       const elapsed = Date.now() - startedAt;
-      if (elapsed < MIN_INDICATOR_MS) await Bun.sleep(MIN_INDICATOR_MS - elapsed);
+      if (elapsed < MIN_INDICATOR_MS && !signal.aborted) await Bun.sleep(MIN_INDICATOR_MS - elapsed);
       this.refreshing = false;
-      this.onUpdated();
+      // A poll that outlives shutdown must not announce itself: the host has
+      // cleared (or is clearing) the display, and a repaint now would land
+      // after the clear and re-register the application on the device.
       if (signal.aborted) break;
+      this.onUpdated();
       await this.sleepUntilDueOrWoken(result.nextPollMs, signal);
     }
   }

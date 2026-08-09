@@ -178,6 +178,30 @@ describe('ModuleRunner', () => {
     await run;
   });
 
+  test('a poll that outlives abort does not fire onUpdated again', async () => {
+    let release: (() => void) | null = null;
+    const fake = fakeModule(() => ({ nextPollMs: 60_000, holdRefreshMs: 0 }));
+    const slowModule: MonitorModule = {
+      ...fake.module,
+      async poll() {
+        await new Promise<void>((resolve) => { release = resolve; });
+        return { nextPollMs: 60_000, holdRefreshMs: 0 };
+      },
+    };
+    let updates = 0;
+    const controller = new AbortController();
+    const runner = new ModuleRunner(slowModule, () => updates++, () => {});
+    const run = runner.run(controller.signal);
+
+    await sleep(20); // poll is now blocked in flight
+    expect(updates).toBe(1); // the refreshing=true paint
+    controller.abort();
+    release!(); // the poll resolves only after shutdown began
+    await run;
+    expect(updates).toBe(1); // no repaint on the way out — the display is cleared
+    expect(runner.refreshing).toBe(false);
+  });
+
   test('abort during the inter-poll sleep ends the loop promptly', async () => {
     const fake = fakeModule(() => ({ nextPollMs: 3_600_000, holdRefreshMs: 0 }));
     const controller = new AbortController();

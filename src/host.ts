@@ -89,6 +89,12 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
   let switchResume: ReturnType<typeof setTimeout> | null = null;
 
   function drawFrame(elements: DrawElement[]): void {
+    // Every draw except the farewell (which shutdown() sends itself) funnels
+    // through here, so this one gate keeps a poll or prompt that outlives
+    // shutdown from landing after the clear and re-registering the
+    // application. The abort listener below stops the *scheduled* draws; this
+    // catches the ones already in flight when the abort fired.
+    if (controller.signal.aborted) return;
     void session.draw(elements).then(
       // A success closes any open draw incident — during a device outage the
       // heartbeat fails once a minute, and the recovery line is the only
@@ -276,7 +282,15 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
    * latter passes `farewell` to play the firmware's turn-off animation
    * first, so quitting from the device reads as the device powering down;
    * Ctrl-C at the terminal stays instant. */
+  let exiting = false;
   function shutdown(farewell = false): void {
+    if (exiting) {
+      // A second signal while the farewell/clear is in flight means "now":
+      // skip the remaining niceties. Anything left on screen self-expires via
+      // the element timeout. No argument, so a fatal path's exitCode survives.
+      process.exit();
+    }
+    exiting = true;
     controller.abort();
     void (async () => {
       if (farewell && (await farewellReady)) {
@@ -316,7 +330,9 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
   } catch (error) {
     // A module poll() throw is fatal by contract (e.g. NoCredentialsError):
     // stop everything, leave the display clean, and exit non-zero. As on
-    // SIGINT, the LED chain drains before the clear.
+    // SIGINT, the LED chain drains before the clear. A signal arriving during
+    // this cleanup exits (keeping exitCode 1) rather than replaying it.
+    exiting = true;
     controller.abort();
     const expected = error instanceof Error && !BUILTIN_ERROR_NAMES.has(error.name);
     logError('host', expected ? (error as Error).message : ((error as Error)?.stack ?? String(error)));
