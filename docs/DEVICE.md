@@ -101,6 +101,21 @@ so a default-priority draw won't interrupt a focus session.
 > a second). `DisplaySession` in `src/display.ts` does this automatically for ids that
 > disappear between consecutive draws.
 
+> **An application may hold at most 100 elements**, and the limit is on the *persisted
+> set*, not the request: exceeding it fails the whole draw with
+> `400 {"error":"Elements number limit exceeded"}`. Bisected on firmware 1.1.1
+> (2026-08-09): a fresh app accepts 100 and rejects 101 in one request, and a 60-element
+> draw followed by 60 *different* ids — 120 persisted — is rejected even though each
+> request is under the limit. Two design consequences. First, the budget must cover
+> *transitions*: switching a frame to a disjoint element set keeps the old ids alive
+> (tombstones expire in ~1s) alongside the new ones, so both sets must fit 100
+> together — a module can wedge for up to its element-timeout if they don't, since the
+> failing draw is retried against the same persisted set. Second, dense visuals
+> (charts, grids — anything approaching per-pixel drawing) don't fit element rendering
+> at all; render a pixel buffer into a one-frame animation asset instead
+> (`src/anim.ts` + `/api/assets/upload`, one element total — see the animation-section
+> notes below and `src/modules/claude-stats.ts` for the pattern).
+
 ```sh
 # Draw scrolling green text on the front display for 20s
 curl -X POST http://10.0.4.20/api/display/draw \
@@ -202,6 +217,27 @@ makes playback position readable; flame frames were then matched byte-exact):
   `tools/flame.ts` glides between its 16 levels this way, one level per ~150 ms;
   641 sections in a 2.7 MiB file are accepted without complaint, and measured
   step transitions are the size of ~2 ordinary frames of motion.
+
+**Static screens as sections — three interacting quirks** (all verified on firmware
+1.1.1, 2026-08-09, with a red/green/blue solid-frame probe; the pattern lives in
+`src/modules/claude-stats.ts`):
+
+- **A looping one-display-frame section is not honoured.** `loop: true` on a section
+  spanning a single display frame plays through the rest of the file and settles on the
+  file's *last* frame — every section of a 3-frame file showed frame 3's content.
+- **`loop: false` plays the section correctly but then goes dead**: once finished, the
+  element ignores redraws entirely (including a changed `section`), so it can never be
+  switched again. The restart-on-every-redraw rule above evidently holds only while the
+  element is looping.
+- **The fix is both**: write each static frame *twice* so its section spans two display
+  frames (the encoder folds the duplicate into `duration: 2`, so it costs nothing), and
+  keep `loop: true`. Multi-display-frame looping sections hold their content and switch
+  cleanly in every direction. Pick the fps for switch latency, not motion: switches land
+  on a frame boundary, so 1 fps lags a section change by up to a second while 30 fps
+  makes it ~33 ms.
+
+Text and rectangle elements drawn after an animation element composite over it — a
+pixel-buffer chart can carry ordinary text labels on top.
 
 Two animation elements play simultaneously and composite by `opacity`
 (later-drawn on top; output ≈ top·op + bottom·(1−op), e.g. 255 red under a

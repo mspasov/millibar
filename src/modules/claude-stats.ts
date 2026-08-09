@@ -1,26 +1,42 @@
 /**
- * Claude Code token history as a monitor module — the "last N days" graph.
+ * Claude Code token history as a monitor module: last-30-days and last-7-days
+ * bar charts, and an all-time calendar heatmap — the three graphs Claude Code
+ * itself draws from this data (docs/USAGE-GRAPH.md), sized for 72x16.
  *
- * Layout (72x16): view label top-left, window-total top-right, and a bar per
- * day along the bottom, newest day at the right edge. Bars are scaled to the
- * window's tallest day and stacked by model: the window's top three models get
- * the palette (bottom-up in rank order), everything else merges into a grey
- * "other" cap — the same top-3 cut Claude Code's own Tokens-per-Day chart
- * makes. Rotating the encoder switches the 30-day and 7-day windows.
+ * The charts are not drawn as elements. The firmware caps an application at
+ * 100 live elements (DEVICE.md) and a 30-day stacked chart alone brushes that
+ * — with the heatmap's ~360 cells far past it, and element scrubbing during
+ * view switches needing both views' ids alive at once. So the module renders
+ * each view into a 72x16 pixel buffer, packs all three into one animation
+ * asset with a named section per view, and uploads it when the data changes.
+ * A frame is then one animation element (pointing at the section) plus three
+ * text elements; switching views swaps the `section` name — the pattern
+ * DEVICE.md recommends for state-driven screens.
  *
- * Data is Claude Code's local stats cache (src/stats.ts, docs/USAGE-GRAPH.md),
- * which only advances when Claude Code itself recomputes it — so the chart is
- * anchored at the newest day *in the data*, not calendar today: trailing days
- * the cache hasn't seen yet would otherwise render as zero-usage lies. When
- * the newest day is behind UTC today the label goes stale ('?', grey) and the
- * gap is spelled out top-centre as e.g. `-3D`.
+ * Bar views: one bar per day, newest at the right edge, scaled to the
+ * window's tallest day and stacked bottom-up by model *family* — a fixed
+ * colour per family (Fable, Opus, Sonnet, Haiku; versions merged), heaviest
+ * family at the bottom, anything unrecognised in a grey cap. The heatmap is
+ * GitHub-shaped: Sun–Sat rows of double-dot day cells by up to 17 week
+ * columns (~4 months), brightness stepped by the percentile buckets
+ * (p25/p50/p75 of nonzero days) Claude Code uses, so one monster day can't
+ * flatten the rest of the map.
  *
- * Static frames, no sweep: this is thirty independent values, not one moving
- * one, and the data changes at most a few times a day. Polling is a local
- * file read — instant, unfailing — so like the CPU module there is no LED
- * pulse and no refresh hold.
+ * Data is Claude Code's local stats cache (src/stats.ts), which only advances
+ * when Claude Code itself recomputes it — so every view anchors at the newest
+ * day *in the data*, not calendar today: trailing days the cache hasn't seen
+ * yet would otherwise render as zero-usage lies. The cache is *by design* a
+ * day behind (its scanner folds in completed UTC days only), so one day of
+ * age is normal; only a gap of two or more days marks the label stale ('?',
+ * grey) and spells the gap out as e.g. `-3D`.
+ *
+ * Static frames, no sweep: these are dozens of independent values, and the
+ * data changes at most a few times a day. Polling is a local file read —
+ * instant, unfailing — so like the CPU module there is no LED pulse and no
+ * refresh hold. The asset re-uploads only when the cache's mtime moves.
  */
-import { COLORS, DISPLAYS, HIDDEN, type DrawElement } from '../display';
+import { encodeAnim } from '../anim';
+import { COLORS, DISPLAYS, HIDDEN, scaleRgb, type DrawElement } from '../display';
 import { wrapIndex, type ModuleContext, type MonitorModule, type PollResult } from '../module';
 import {
   daysBetween,
@@ -30,8 +46,10 @@ import {
   type DayTokens,
   type StatsHistory,
 } from '../stats';
+import { assetsUpload } from '../store';
 
 const WIDTH = DISPLAYS.front.width;
+const HEIGHT = DISPLAYS.front.height;
 
 /** Bars occupy rows 6..15; small text at mid-anchor y=3 spans rows 1..5, so a
  * full-height bar stops one row short of the text. */
@@ -40,28 +58,69 @@ const MAX_BAR_H = 10;
 
 const LABEL_X = 2;
 const TEXT_Y = 3;
-/** Right anchor for the staleness age — the same column claude-usage hangs
- * its countdown on, clear of both the label and the window total. */
+/** Right anchor for the staleness age in the bar views — the same column
+ * claude-usage hangs its countdown on, clear of both label and total. */
 const AGE_ANCHOR_X = 43;
 
-/** Window ranks 1-3, bottom-up in each bar; every model past third merges
- * into OTHER. Orange/cyan/violet keep all three apart from the grey scaffold
- * colours and from each other on the panel. */
-export const MODEL_COLORS = ['#FF9500FF', '#00CCFFFF', '#CC55FFFF'] as const;
+/** Heatmap geometry: each day is a 2x1 "double dot" with a 1px gap on both
+ * axes — Sun–Sat rows at y=1,3,…,13, week columns on a 3px pitch ending at
+ * x=71. Separated dots read as a calendar of days where the earlier 1x2
+ * mosaic read as a brightness blur; the cost is range, 17 columns (~4
+ * months) against the text margin instead of 52. */
+const HEAT_MAX_WEEKS = 17;
+const HEAT_CELL_W = 2;
+const HEAT_PITCH_X = 3;
+const HEAT_RIGHT_X = 71;
+const HEAT_TOP_Y = 1;
+
+/** Fixed palette by model family — colour follows the model, never its rank,
+ * so a window where one family overtakes another recolours nothing, and
+ * versions within a family (Opus 5, 4.8, 4.7…) merge into one segment.
+ * Sonnet's slot is reserved even for users who never touch it: the day it
+ * appears it gets its own green instead of vanishing into the grey cap.
+ * All four hues are distinct from each other and from the grey scaffold on
+ * the panel. Unknown families merge into OTHER. */
+export const FAMILY_COLORS: Record<string, string> = {
+  fable: '#FF9500FF',
+  opus: '#00CCFFFF',
+  sonnet: '#44E066FF',
+  haiku: '#CC55FFFF',
+};
 export const OTHER_COLOR = '#666666FF';
+
+/** `claude-opus-4-8` → `opus`; anything unrecognisable → `other`. */
+export function modelFamily(model: string): string {
+  const match = /^claude-([a-z]+)/.exec(model);
+  return match && match[1]! in FAMILY_COLORS ? match[1]! : 'other';
+}
+
+/** Heatmap brightness ramp for percentile buckets 1-4. Alpha can't dim LEDs,
+ * so the steps scale the components (see scaleRgb). */
+export const HEAT_COLORS = [0.18, 0.38, 0.65, 1].map((f) => scaleRgb('#FF9500FF', f));
+/** An in-range day with zero tokens — dark like the bar views' track, and
+ * distinct from unpainted (black) cells outside the data's range. */
+export const HEAT_ZERO = COLORS.track;
+
+export const ASSET_FILE = 'mbar-stats.anim';
 
 interface StatsView {
   label: string;
+  /** Section name inside ASSET_FILE; view switching is a section switch. */
+  section: string;
+  kind: 'bars' | 'heat';
   days: number;
   barWidth: number;
   gap: number;
 }
 
-/** Both views right-align their newest bar to x=70, leaving a 1px margin. */
+/** Bar views right-align their newest bar to x=70, leaving a 1px margin. */
 const VIEWS: StatsView[] = [
-  { label: '30D', days: 30, barWidth: 1, gap: 1 },
-  { label: '7D', days: 7, barWidth: 8, gap: 2 },
+  { label: '30D', section: '30d', kind: 'bars', days: 30, barWidth: 1, gap: 1 },
+  { label: '7D', section: '7d', kind: 'bars', days: 7, barWidth: 8, gap: 2 },
+  { label: 'ALL', section: 'heat', kind: 'heat', days: 0, barWidth: 0, gap: 0 },
 ];
+
+// --- window shaping (shared with tests) -------------------------------------
 
 /** The last `count` calendar days ending at the newest day in the data, with
  * absent days filled in as zero — inside the data's own range a missing date
@@ -80,43 +139,46 @@ export function windowDays(days: DayTokens[], count: number): DayTokens[] {
   return out;
 }
 
-/** Model ids by window total, descending; name breaks ties so colour
- * assignment is stable run to run. */
-export function rankModels(window: DayTokens[]): string[] {
+/** Families present in the window by total, descending (`other` excluded —
+ * it always caps the stack); name breaks ties so the order is stable. The
+ * heaviest family sits at the bottom of every bar. */
+export function rankFamilies(window: DayTokens[]): string[] {
   const totals = new Map<string, number>();
   for (const day of window) {
     for (const [model, tokens] of Object.entries(day.tokensByModel)) {
-      totals.set(model, (totals.get(model) ?? 0) + tokens);
+      const family = modelFamily(model);
+      if (family !== 'other') totals.set(family, (totals.get(family) ?? 0) + tokens);
     }
   }
   return [...totals.entries()]
-    .sort(([ma, a], [mb, b]) => b - a || ma.localeCompare(mb))
-    .map(([model]) => model);
+    .sort(([fa, a], [fb, b]) => b - a || fa.localeCompare(fb))
+    .map(([family]) => family);
 }
 
-/** One day's bar as bottom-up colour segments. The bar height is the day's
- * share of the window maximum (1px floor so an active day never vanishes);
- * segment heights use largest-remainder rounding so they sum exactly to the
- * bar — plain per-segment rounding can overshoot and poke into the text row. */
+/** One day's bar as bottom-up colour segments, one per model family. The bar
+ * height is the day's share of the window maximum (1px floor so an active day
+ * never vanishes); segment heights use largest-remainder rounding so they sum
+ * exactly to the bar — plain per-segment rounding can overshoot and poke into
+ * the text row. */
 export function stackSegments(
   day: DayTokens,
-  ranked: string[],
+  rankedFamilies: string[],
   maxTotal: number,
   maxHeight = MAX_BAR_H
 ): { color: string; height: number }[] {
   if (day.total <= 0 || maxTotal <= 0) return [];
   const barHeight = Math.max(1, Math.round((day.total / maxTotal) * maxHeight));
 
-  const top = ranked.slice(0, MODEL_COLORS.length);
-  const groups: { color: string; tokens: number }[] = top.map((model, i) => ({
-    color: MODEL_COLORS[i]!,
-    tokens: day.tokensByModel[model] ?? 0,
-  }));
-  let other = 0;
+  const byFamily = new Map<string, number>();
   for (const [model, tokens] of Object.entries(day.tokensByModel)) {
-    if (!top.includes(model)) other += tokens;
+    const family = modelFamily(model);
+    byFamily.set(family, (byFamily.get(family) ?? 0) + tokens);
   }
-  groups.push({ color: OTHER_COLOR, tokens: other });
+  const groups: { color: string; tokens: number }[] = rankedFamilies.map((family) => ({
+    color: FAMILY_COLORS[family]!,
+    tokens: byFamily.get(family) ?? 0,
+  }));
+  groups.push({ color: OTHER_COLOR, tokens: byFamily.get('other') ?? 0 });
 
   const exact = groups.map((g) => (g.tokens / day.total) * barHeight);
   const heights = exact.map(Math.floor);
@@ -135,12 +197,147 @@ export function stackSegments(
     .filter((s) => s.height > 0);
 }
 
+// --- pixel painting ----------------------------------------------------------
+
+function fillRect(frame: Uint8Array, x: number, y: number, w: number, h: number, color: string): void {
+  const r = parseInt(color.slice(1, 3), 16);
+  const g = parseInt(color.slice(3, 5), 16);
+  const b = parseInt(color.slice(5, 7), 16);
+  for (let dy = 0; dy < h; dy++) {
+    for (let dx = 0; dx < w; dx++) {
+      const o = ((y + dy) * WIDTH + (x + dx)) * 3;
+      frame[o] = r;
+      frame[o + 1] = g;
+      frame[o + 2] = b;
+    }
+  }
+}
+
+/** A bar view as a full 72x16 RGB frame: dark baseline across the window's
+ * extent (so idle days still read as part of the chart), stacked bars over
+ * it. The top row band stays black for the text elements drawn above. */
+export function paintBars(window: DayTokens[], view: { days: number; barWidth: number; gap: number }): Uint8Array {
+  const frame = new Uint8Array(WIDTH * HEIGHT * 3);
+  if (window.length === 0) return frame;
+  const ranked = rankFamilies(window);
+  const maxTotal = Math.max(...window.map((d) => d.total));
+  const span = view.days * view.barWidth + (view.days - 1) * view.gap;
+  const x0 = 71 - span;
+
+  fillRect(frame, x0, CHART_BOTTOM, span, 1, COLORS.track);
+  window.forEach((day, i) => {
+    const x = x0 + i * (view.barWidth + view.gap);
+    let below = 0;
+    for (const segment of stackSegments(day, ranked, maxTotal)) {
+      fillRect(frame, x, CHART_BOTTOM - below - segment.height + 1, view.barWidth, segment.height, segment.color);
+      below += segment.height;
+    }
+  });
+  return frame;
+}
+
+/** Percentile thresholds over the nonzero day totals — Claude Code's own
+ * bucketing (p25/p50/p75), which keeps one monster day from flattening the
+ * rest of the map. Null when nothing is nonzero. */
+export function heatThresholds(days: DayTokens[]): { p25: number; p50: number; p75: number } | null {
+  const totals = days
+    .map((d) => d.total)
+    .filter((t) => t > 0)
+    .sort((a, b) => a - b);
+  if (totals.length === 0) return null;
+  return {
+    p25: totals[Math.floor(totals.length * 0.25)]!,
+    p50: totals[Math.floor(totals.length * 0.5)]!,
+    p75: totals[Math.floor(totals.length * 0.75)]!,
+  };
+}
+
+export function heatLevel(total: number, thresholds: ReturnType<typeof heatThresholds>): number {
+  if (total <= 0 || !thresholds) return 0;
+  if (total >= thresholds.p75) return 4;
+  if (total >= thresholds.p50) return 3;
+  if (total >= thresholds.p25) return 2;
+  return 1;
+}
+
+/** The heatmap's rendered range: Sunday-started weeks (the cache's UTC days,
+ * Claude Code's week convention), ending with the newest day's week, capped
+ * at HEAT_MAX_WEEKS. */
+export function heatSpan(days: DayTokens[]): { startMs: number; weeks: number } | null {
+  const newest = days.at(-1);
+  if (!newest) return null;
+  const first = days[0]!;
+  const newestMs = Date.parse(newest.date);
+  const sundayMs = newestMs - new Date(newestMs).getUTCDay() * 86_400_000;
+  const firstSundayMs = Date.parse(first.date) - new Date(Date.parse(first.date)).getUTCDay() * 86_400_000;
+  const weeks = Math.min(HEAT_MAX_WEEKS, Math.round((sundayMs - firstSundayMs) / (7 * 86_400_000)) + 1);
+  return { startMs: sundayMs - (weeks - 1) * 7 * 86_400_000, weeks };
+}
+
+/** The all-time heatmap as a full 72x16 RGB frame: double-dot day cells (see
+ * the geometry constants), a week column per 3px, right-aligned so the newest
+ * week hugs the edge. Three cell states: black outside the data's range
+ * (unknown, not zero), dark track inside it on idle days, and the orange ramp
+ * by percentile bucket. The left margin stays black for the stacked text. */
+export function paintHeatmap(days: DayTokens[]): Uint8Array {
+  const frame = new Uint8Array(WIDTH * HEIGHT * 3);
+  const span = heatSpan(days);
+  if (!span) return frame;
+  const byDate = new Map(days.map((d) => [d.date, d]));
+  const firstDataMs = Date.parse(days[0]!.date);
+  const newestMs = Date.parse(days.at(-1)!.date);
+  const thresholds = heatThresholds(days.filter((d) => Date.parse(d.date) >= span.startMs));
+  const x0 = HEAT_RIGHT_X - (span.weeks * HEAT_PITCH_X - 1) + 1;
+
+  for (let ms = Math.max(span.startMs, firstDataMs); ms <= newestMs; ms += 86_400_000) {
+    const date = new Date(ms).toISOString().slice(0, 10);
+    const week = Math.floor((ms - span.startMs) / (7 * 86_400_000));
+    const level = heatLevel(byDate.get(date)?.total ?? 0, thresholds);
+    const color = level === 0 ? HEAT_ZERO : HEAT_COLORS[level - 1]!;
+    fillRect(frame, x0 + week * HEAT_PITCH_X, HEAT_TOP_Y + new Date(ms).getUTCDay() * 2, HEAT_CELL_W, 1, color);
+  }
+  return frame;
+}
+
+// --- formatting ---------------------------------------------------------------
+
 /** Claude Code's y-axis notation, uppercased for the bitmap font. */
 export function formatTokensCompact(n: number): string {
   if (n >= 999_950_000) return `${(n / 1e9).toFixed(1)}B`;
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
   if (n >= 1000) return `${Math.round(n / 1000)}K`;
   return `${Math.round(n)}`;
+}
+
+/** Narrower variant for the heatmap's 18px left margin: whole megacounts. */
+export function formatTokensShort(n: number): string {
+  if (n >= 999_950_000) return `${(n / 1e9).toFixed(1)}B`;
+  if (n >= 1e6) return `${Math.round(n / 1e6)}M`;
+  return formatTokensCompact(n);
+}
+
+// --- the module ---------------------------------------------------------------
+
+/** One static frame per view, each written twice so its section spans two
+ * display frames (folded to one file frame of duration 2, so the duplicate is
+ * ~free). Both halves of that shape are load-bearing, verified on-device
+ * (firmware 1.1.1, DEVICE.md): a looping ONE-frame section is not honoured —
+ * playback runs through the file and settles on its last frame, so every
+ * view showed the heatmap — and fps is the section-switch latency, since
+ * switches land on a frame boundary (1 fps lagged the encoder by up to a
+ * second; 30 fps is ~33ms while re-showing the same pixels). */
+export function encodeStatsAsset(days: DayTokens[]): Uint8Array {
+  const frames = [
+    paintBars(windowDays(days, VIEWS[0]!.days), VIEWS[0]!),
+    paintBars(windowDays(days, VIEWS[1]!.days), VIEWS[1]!),
+    paintHeatmap(days),
+  ].flatMap((frame) => [frame, frame]);
+  return encodeAnim(frames, {
+    width: WIDTH,
+    height: HEIGHT,
+    fps: 30,
+    sections: VIEWS.map((view, i) => ({ name: view.section, start: 2 * i, end: 2 * i + 1 })),
+  });
 }
 
 export interface ClaudeStatsOptions {
@@ -151,14 +348,26 @@ export interface ClaudeStatsOptions {
   statsPath?: string;
   /** UTC-today source, injectable so staleness tests can pin the calendar. */
   todayImpl?: () => string;
+  /** Asset transport, injectable for tests. */
+  uploadImpl?: typeof assetsUpload;
 }
 
 export function claudeStatsModule(options: ClaudeStatsOptions = {}): MonitorModule {
-  const { pollIntervalMs = 60_000, statsPath = statsCachePath(), todayImpl = utcToday } = options;
+  const {
+    pollIntervalMs = 60_000,
+    statsPath = statsCachePath(),
+    todayImpl = utcToday,
+    uploadImpl = assetsUpload,
+  } = options;
   let ctx: ModuleContext | null = null;
   let history: StatsHistory | null = null;
   let viewIndex = 0;
   let warnedMissing = false;
+  /** mtime of the cache content the device-side asset was built from; null
+   * until the first successful upload, during which the frame is text-only —
+   * an animation element pointing at a path that was never uploaded must not
+   * be drawn. */
+  let uploadedMtimeMs: number | null = null;
 
   const load = (): void => {
     const loaded = loadStatsHistory(statsPath);
@@ -173,12 +382,35 @@ export function claudeStatsModule(options: ClaudeStatsOptions = {}): MonitorModu
     }
     if (loaded.modifiedAtMs !== history?.modifiedAtMs) {
       const newest = loaded.days.at(-1)!.date;
-      const totals = VIEWS.map(
+      const totals = VIEWS.filter((v) => v.kind === 'bars').map(
         (v) => `${v.label} ${formatTokensCompact(windowDays(loaded.days, v.days).reduce((a, d) => a + d.total, 0))}`
       );
       ctx?.log(`history through ${newest}: ${totals.join(', ')}`);
     }
     history = loaded;
+  };
+
+  /** Re-encode and re-upload when the cache content moved. A failed upload
+   * retries next poll; the on-device asset (possibly from a previous run —
+   * assets persist) keeps serving meanwhile. */
+  const syncAsset = async (): Promise<void> => {
+    if (!ctx || !history || uploadedMtimeMs === history.modifiedAtMs) return;
+    try {
+      await uploadImpl(ctx.applicationName, ASSET_FILE, encodeStatsAsset(history.days));
+      uploadedMtimeMs = history.modifiedAtMs;
+      ctx.log(`uploaded ${ASSET_FILE}`);
+    } catch (error) {
+      ctx.warn(`asset upload failed: ${(error as Error).message}`);
+    }
+  };
+
+  const windowTotal = (view: StatsView): number => {
+    if (!history) return 0;
+    if (view.kind === 'heat') {
+      const span = heatSpan(history.days);
+      return history.days.reduce((a, d) => (span && Date.parse(d.date) >= span.startMs ? a + d.total : a), 0);
+    }
+    return windowDays(history.days, view.days).reduce((a, d) => a + d.total, 0);
   };
 
   return {
@@ -188,18 +420,26 @@ export function claudeStatsModule(options: ClaudeStatsOptions = {}): MonitorModu
     init(context) {
       ctx = context;
       // The runner renders before the first poll resolves; loading here makes
-      // even that first frame carry the chart.
+      // even that first frame carry the text (the chart follows the upload).
       load();
     },
 
     async poll(): Promise<PollResult> {
       load();
+      await syncAsset();
       return { nextPollMs: pollIntervalMs, holdRefreshMs: 0 };
     },
 
     render(): DrawElement[] {
       const view = VIEWS[viewIndex]!;
-      const text = (id: string, value: string, color: string, align: 'mid_left' | 'mid_right', x: number): DrawElement => ({
+      const text = (
+        id: string,
+        value: string,
+        color: string,
+        align: 'mid_left' | 'mid_right',
+        x: number,
+        y = TEXT_Y
+      ): DrawElement => ({
         id,
         type: 'text',
         text: value,
@@ -207,66 +447,67 @@ export function claudeStatsModule(options: ClaudeStatsOptions = {}): MonitorModu
         color,
         align,
         x,
-        y: TEXT_Y,
+        y,
         display: 'front',
       });
 
       if (!history) return [text('label', 'NO STATS', COLORS.stale, 'mid_left', LABEL_X)];
 
-      const window = windowDays(history.days, view.days);
-      const ranked = rankModels(window);
-      const maxTotal = Math.max(...window.map((d) => d.total));
-      const windowTotal = window.reduce((a, d) => a + d.total, 0);
+      const ageDays = Math.max(0, daysBetween(history.days.at(-1)!.date, todayImpl()));
+      // One day behind is the cache's freshest possible state, not staleness:
+      // Claude Code's scanner only folds in *completed* UTC days, so repeated
+      // /usage recomputes never add the current day (observed 2026-08-09 —
+      // and the binary's incremental scan is anchored on a "yesterday"
+      // helper). The marks appear only when the gap exceeds that by-design
+      // day, i.e. when a recompute is genuinely overdue.
+      const stale = ageDays > 1;
+      const labelColor = stale ? COLORS.stale : COLORS.label;
+      const label = stale ? `${view.label}?` : view.label;
+      // Kept non-empty while hidden — persisted elements re-render their
+      // previous text under zero alpha otherwise (same trick as claude-usage).
+      const age = stale ? `-${ageDays}D` : '0';
+      const ageColor = stale ? COLORS.reset : HIDDEN(COLORS.reset);
 
-      const ageDays = Math.max(0, daysBetween(window.at(-1)!.date, todayImpl()));
-      const stale = ageDays > 0;
-
-      const span = view.days * view.barWidth + (view.days - 1) * view.gap;
-      const x0 = 71 - span;
-      const rect = (id: string, x: number, y: number, width: number, height: number, color: string): DrawElement => ({
-        id,
-        type: 'rectangle',
-        x,
-        y,
-        width,
-        height,
-        radius: 0,
-        fill: 'solid',
-        fill_colors: [color],
-        border_width: 0,
-        border_color: color,
-        display: 'front',
-      });
-
-      const bars: DrawElement[] = [];
-      window.forEach((day, i) => {
-        const x = x0 + i * (view.barWidth + view.gap);
-        let below = 0;
-        for (const [k, segment] of stackSegments(day, ranked, maxTotal).entries()) {
-          bars.push(rect(`b${i}s${k}`, x, CHART_BOTTOM - below - segment.height + 1, view.barWidth, segment.height, segment.color));
-          below += segment.height;
-        }
-      });
-
-      return [
-        // Baseline first: bars composite over it, and its full span marks the
-        // window's extent through idle (zero) days.
-        rect('base', x0, CHART_BOTTOM, span, 1, COLORS.track),
-        ...bars,
-        text('label', stale ? `${view.label}?` : view.label, stale ? COLORS.stale : COLORS.label, 'mid_left', LABEL_X),
-        // Kept non-empty while hidden — persisted elements re-render their
-        // previous text under zero alpha otherwise (same trick as claude-usage).
-        text('age', stale ? `-${ageDays}D` : '0', stale ? COLORS.reset : HIDDEN(COLORS.reset), 'mid_right', AGE_ANCHOR_X),
-        text('total', formatTokensCompact(windowTotal), stale ? COLORS.stale : COLORS.label, 'mid_right', WIDTH - 2),
-      ];
+      const elements: DrawElement[] = [];
+      if (uploadedMtimeMs !== null) {
+        elements.push({
+          id: 'chart',
+          type: 'animation',
+          path: ASSET_FILE,
+          section: view.section,
+          // loop:true is load-bearing even though the section is static: a
+          // finished loop:false element ignores redraws entirely, so the
+          // section could never switch again (verified on-device; DEVICE.md).
+          loop: true,
+          await_previous_end: false,
+          opacity: 100,
+          x: 0,
+          y: 0,
+          display: 'front',
+        });
+      }
+      if (view.kind === 'heat') {
+        // The grid owns the panel from x=20; text stacks in the left margin.
+        elements.push(
+          text('label', label, labelColor, 'mid_left', LABEL_X),
+          text('total', formatTokensShort(windowTotal(view)), labelColor, 'mid_left', LABEL_X, 8),
+          text('age', age, ageColor, 'mid_left', LABEL_X, 13)
+        );
+      } else {
+        elements.push(
+          text('label', label, labelColor, 'mid_left', LABEL_X),
+          text('age', age, ageColor, 'mid_right', AGE_ANCHOR_X),
+          text('total', formatTokensCompact(windowTotal(view)), labelColor, 'mid_right', WIDTH - 2)
+        );
+      }
+      return elements;
     },
 
     onEncoder(delta) {
       viewIndex = wrapIndex(viewIndex, delta, VIEWS.length);
       const view = VIEWS[viewIndex]!;
       if (history) {
-        const total = windowDays(history.days, view.days).reduce((a, d) => a + d.total, 0);
-        ctx?.log(`-> ${view.label} (${formatTokensCompact(total)} tokens)`);
+        ctx?.log(`-> ${view.label} (${formatTokensCompact(windowTotal(view))} tokens)`);
       }
     },
   };

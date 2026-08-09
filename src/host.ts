@@ -126,6 +126,7 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
 
   modules.forEach((module, index) => {
     module.init?.({
+      applicationName,
       requestRender: () => {
         if (activeIndex === index) repaint();
       },

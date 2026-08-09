@@ -96,19 +96,40 @@ colors, format})`):
 
 Implemented: `src/stats.ts` reads the cache (entry-wise, defensively — the file is
 undocumented and version-gated at `version: 5`), and `src/modules/claude-stats.ts`
-renders it as a monitor module — 30-day (1px bars + 1px gaps) and 7-day (8px bars)
-windows, each bar max-scaled and stacked bottom-up by the window's top-3 models, with
-the remainder as a grey cap. Verified on-device 2026-08-09: ~40 elements per frame
-accepted at once, stacked 1px-wide columns read fine.
+renders it as a monitor module with all three of Claude Code's graph forms, verified
+on-device 2026-08-09:
+
+- **30D / 7D**: one bar per day (1px and 8px wide respectively), max-scaled to the
+  window's tallest day, stacked bottom-up by model *family* — a fixed colour per family
+  (Fable orange, Opus cyan, Sonnet green, Haiku violet; versions merged, Sonnet's slot
+  reserved even when unused), heaviest family at the bottom, unknown families in a grey
+  cap. Fixed family colours rather than Claude Code's rank-based top-3 cut: colour
+  follows the entity, so nothing recolours when rankings shift between windows.
+- **ALL**: the Overview-style calendar heatmap — Sun–Sat rows of 2×1 "double dot" day
+  cells with 1px gaps on both axes, by up to 17 Sunday-started week columns (~4 months,
+  newest at the right edge). Brightness steps by the same p25/p50/p75 percentile buckets
+  Claude Code uses; dark cells are in-range idle days, black is outside the data's
+  range. (A denser 1×2-cell mosaic showed ~31 weeks but read as a brightness blur;
+  separated dots won the on-device comparison, 2026-08-09.)
+
+The views are not drawn as display elements — the firmware caps an app at 100 live
+elements (DEVICE.md), which a stacked 30-day chart brushes and ~360 heatmap cells far
+exceed. Instead each view is painted into a 72×16 pixel buffer and all three are packed
+into one animation asset with a named section per view; rotating the encoder redraws
+one animation element with a different `section`. The section/loop/fps traps this ran
+into are documented in DEVICE.md's animation notes.
 
 Two behaviours worth keeping in mind, both inherited from the cache:
 
-- **It only advances when Claude Code itself recomputes** (opening its stats panel);
-  three days stale is routine. The module therefore anchors its window at the newest
-  *data* day rather than calendar today — trailing calendar days would render as
-  false zeroes — and marks the gap (`30D?` + `-3D`).
+- **The newest possible entry is always *yesterday*.** Recomputes (opening the stats
+  panel) do move the cache, but the scanner only folds in completed UTC days — repeated
+  `/usage` runs on 2026-08-09 advanced it to 2026-08-08 and never further, matching the
+  yesterday-anchored incremental scan visible in the binary. So one day of age is the
+  fresh steady state, and going without recomputes for a stretch (days without opening
+  the stats panel) leaves it further behind. The module anchors its window at the
+  newest *data* day rather than calendar today — trailing calendar days would render
+  as false zeroes — treats ≤1 day of age as fresh, and marks two or more
+  (`30D?` + `-2D`).
 - **Days are UTC buckets**, so the bar boundaries won't match a local-midnight mental
   model (ai-token-monitor buckets locally and disagrees with Claude Code the same way).
 
-Not built: the heatmap form (7 rows × up to ~52 week columns also fits 72×16, hue or
-brightness encoding the percentile bucket) — a natural third view if wanted.

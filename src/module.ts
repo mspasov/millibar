@@ -31,6 +31,10 @@ export interface RenderFrame {
 }
 
 export interface ModuleContext {
+  /** The application_name the host draws (and owns assets) under. Uploads
+   * must use it: an animation element's `path` resolves within the asset
+   * directory of the application named on the draw. */
+  applicationName: string;
   /** Ask the host to repaint; a no-op while this module is hidden. */
   requestRender(): void;
   /** Pulse the status light; `shape` overrides the default slow two-cycle
