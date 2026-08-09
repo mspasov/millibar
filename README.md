@@ -153,7 +153,8 @@ Each is usable on its own, not just by the monitor.
 - **`src/modules/`** — the modules themselves: `claude-gauge.ts` (one limit
   window at a time), `claude-dash.ts` (every window at once; their shared
   fetch/state machinery lives in `limit-poller.ts`), `claude-history.ts`,
-  `cpu.ts`.
+  `cpu.ts` (1/5/15-minute load averages normalised by core count — sustained
+  pressure, not instantaneous CPU%).
 - **`src/mbar.ts`** — the entry point that registers modules with the host.
 
 ### Monitor behaviour
@@ -257,6 +258,8 @@ recovers on its own.
   drawing, priorities, the animation format, input events, the status light, and the
   spec's inaccuracies. Read this before touching device code.
 - **[USAGE-API.md](docs/USAGE-API.md)** — the undocumented Claude Code usage endpoint.
+- **[USAGE-GRAPH.md](docs/USAGE-GRAPH.md)** — where the "last N days" usage graphs come
+  from (local stats, not a server endpoint) and how the history module renders them.
 - **[CLAUDE.md](CLAUDE.md)** — working practices for this repo.
 
 ## Requirements

@@ -2,7 +2,8 @@
 
 Findings from reading the Claude Code v2.1.226 binary (the JS bundle is embedded in the
 executable and greppable with `rg -a` / `strings`) and the reference implementation in
-`~/Development/ai-token-monitor`. Explored 2026-08-09.
+`~/Development/ai-token-monitor` — a sibling project on the author's machine, not part
+of this repo. Explored 2026-08-09.
 
 ## There is no history endpoint
 

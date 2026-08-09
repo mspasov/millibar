@@ -30,8 +30,8 @@ Claude Code stores an OAuth token that this endpoint accepts.
 
 The token lives at `claudeAiOauth.accessToken`, with expiry at `claudeAiOauth.expiresAt`.
 
-Three things make naive lookups fail, all learned from
-[ai-token-monitor](https://github.com/)'s `src-tauri/src/oauth_usage.rs`, which is the
+Three things make naive lookups fail, all learned from `ai-token-monitor` (a sibling
+local project, not part of this repo) — its `src-tauri/src/oauth_usage.rs` is the
 reference implementation this port follows:
 
 - **One service can hold several items.** Some carry only `mcpOAuth` and no usable token.

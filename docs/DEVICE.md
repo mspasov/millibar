@@ -77,12 +77,14 @@ This repo resolves routes (USB → LAN → cloud, with per-route credentials) th
 “Connecting to the device”. A probe is `GET /api/version` requiring `api_semver` in the
 reply, which also filters out captive portals answering 200 to everything.
 
-## This device
+## Verified against
+
+Everything in this document was observed on this configuration (the serial is
+deliberately not recorded — it identifies one physical unit and reproduces nothing):
 
 | Field | Value |
 |---|---|
 | Model | BB.1 |
-| Serial | `[serial redacted]` |
 | Firmware | 1.1.1 (built 2026-07-29, commit `ac59f45c`) |
 | API semver | 25.0.0 |
 | Firmware security | secure |
