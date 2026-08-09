@@ -38,7 +38,11 @@ reference implementation this port follows:
   Try multiple account candidates and accept only an item that actually yields
   `claudeAiOauth` — otherwise the lookup lands on a tokenless item and reports failure.
 - **Claude Code v2.1.52+ uses a hashed service name**, `Claude Code-credentials-{hash}`.
-  Discover it rather than assuming the legacy name.
+  Discover it rather than assuming the legacy name. Discovery here means
+  `security dump-keychain` — a metadata walk of the *entire* keychain (slow on large
+  ones, and broader than one service lookup), so run it only after the fixed legacy
+  name yields nothing, and remember the item that answered for the process lifetime
+  (src/usage.ts does both).
 - **The Keychain payload may have a leading non-JSON byte.** Strip before parsing.
 
 Refresh is best delegated to the CLI — run `claude auth status --json` and re-read the

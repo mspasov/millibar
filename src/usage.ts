@@ -119,15 +119,38 @@ function readCredentialsFile(): Credentials | null {
   }
 }
 
+/** The (service, account) pair that last yielded credentials, remembered for
+ * the process lifetime so a poll loop doesn't re-run discovery every cycle.
+ * Dropped the moment it stops answering (Claude Code rotated its hashed name,
+ * or the item was deleted), which falls through to a fresh discovery. */
+let knownKeychainItem: { service: string; account: string | null } | null = null;
+
 function readCredentials(): Credentials | null {
   if (process.platform === 'darwin') {
-    const accounts = [null, 'unknown', userInfo().username];
-    for (const service of [KEYCHAIN_SERVICE, ...discoverServiceNames()]) {
-      for (const account of accounts) {
-        const credentials = keychainLookup(service, account);
-        if (credentials) return credentials;
-      }
+    if (knownKeychainItem) {
+      const remembered = keychainLookup(knownKeychainItem.service, knownKeychainItem.account);
+      if (remembered) return remembered;
+      knownKeychainItem = null;
     }
+    const accounts = [null, 'unknown', userInfo().username];
+    const tryServices = (services: string[]): Credentials | null => {
+      for (const service of services) {
+        for (const account of accounts) {
+          const credentials = keychainLookup(service, account);
+          if (credentials) {
+            knownKeychainItem = { service, account };
+            return credentials;
+          }
+        }
+      }
+      return null;
+    };
+    // The fixed legacy name first, on its own: dump-keychain walks the user's
+    // entire keychain and is the slow, broad part of this path, so it must
+    // run only when the legacy name yields nothing — `??` keeps it lazy. (The
+    // array-literal spread it replaces ran the dump on every lookup.)
+    const found = tryServices([KEYCHAIN_SERVICE]) ?? tryServices(discoverServiceNames());
+    if (found) return found;
   }
   return readCredentialsFile();
 }
