@@ -286,12 +286,24 @@ export function describeConnection(conn: Connection): string {
  * route. `AbortSignal.timeout` aborts carry `TimeoutError`, deliberate aborts
  * `AbortError`, which is how the two are told apart.
  */
+/** Per-call headers layered over the route's auth headers. `HeadersInit` has
+ * three shapes — plain object, `Headers` instance, tuple array — and object-
+ * spreading the latter two silently mangles them (a `Headers` has no own
+ * enumerable properties, an array spreads to numeric keys), so a caller using
+ * either shape would lose its headers without an error. Normalise through
+ * `Headers` instead; `set` keeps per-call values winning over auth. */
+function mergeHeaders(base: Record<string, string>, extra?: RequestInit['headers']): Headers {
+  const headers = new Headers(base);
+  if (extra) new Headers(extra).forEach((value, key) => headers.set(key, value));
+  return headers;
+}
+
 export async function deviceFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const conn = await resolveConnection();
   try {
     return await fetch(`${conn.base}${apiPath(conn.route.addr, path)}`, {
       ...init,
-      headers: { ...conn.headers, ...((init.headers as Record<string, string>) ?? {}) },
+      headers: mergeHeaders(conn.headers, init.headers),
     });
   } catch (error) {
     const aborted = init.signal?.aborted === true;

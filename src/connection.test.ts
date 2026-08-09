@@ -68,7 +68,13 @@ function fakeDevice(
         return new Response(opts.versionBody ?? JSON.stringify({ api_semver: opts.semver ?? '25.0.0' }));
       }
       if (opts.hang) return new Promise<Response>(() => {});
-      return new Response(JSON.stringify({ echoed: url.pathname, auth: req.headers.get('Authorization') }));
+      return new Response(
+        JSON.stringify({
+          echoed: url.pathname,
+          auth: req.headers.get('Authorization'),
+          ctype: req.headers.get('Content-Type'),
+        })
+      );
     },
   });
   servers.push(server);
@@ -274,6 +280,31 @@ describe('deviceFetch', () => {
     expect(body.echoed).toBe('/api/status');
     expect(body.auth).toBe('Bearer tok');
     expect(device.versionHits.length).toBe(0); // trusted verbatim, never probed
+  });
+
+  test('every HeadersInit shape merges with auth instead of dropping headers', async () => {
+    const device = fakeDevice();
+    process.env.BUSY_BAR_ADDR = device.addr;
+    process.env.BUSY_BAR_TOKEN = 'tok';
+    // A Headers instance and a tuple array have no own enumerable string keys,
+    // so the old object-spread merge lost them silently.
+    const shapes: NonNullable<RequestInit['headers']>[] = [
+      { 'Content-Type': 'application/json' },
+      new Headers({ 'Content-Type': 'application/json' }),
+      [['Content-Type', 'application/json']],
+    ];
+    for (const headers of shapes) {
+      const body = (await (await deviceFetch('/api/status', { headers })).json()) as {
+        auth: string; ctype: string;
+      };
+      expect(body.auth).toBe('Bearer tok'); // auth survived the merge
+      expect(body.ctype).toBe('application/json'); // and the caller's header arrived
+    }
+    // Per-call headers still win over the route's auth, whatever the shape.
+    const override = (await (
+      await deviceFetch('/api/status', { headers: new Headers({ Authorization: 'Bearer other' }) })
+    ).json()) as { auth: string };
+    expect(override.auth).toBe('Bearer other');
   });
 
   test('a timed-out request invalidates the route; a deliberate abort keeps it', async () => {
