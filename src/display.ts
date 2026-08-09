@@ -211,6 +211,9 @@ export interface DisplaySessionOptions {
   timeoutS: number;
   /** Transport, injectable for tests. Defaults to the real device. */
   send?: (body: DisplayDrawParams) => Promise<void>;
+  /** Clear transport, mirroring `send` — without it a session with a stubbed
+   * `send` still hits the network on `clear()`. */
+  clear?: () => Promise<void>;
 }
 
 export class DisplaySession {
@@ -258,7 +261,7 @@ export class DisplaySession {
     return this.serialise(() => {
       this.last.clear();
       this.pending.clear();
-      return displayClear(this.options.applicationName);
+      return (this.options.clear ?? (() => displayClear(this.options.applicationName)))();
     });
   }
 }

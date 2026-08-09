@@ -187,4 +187,22 @@ describe('DisplaySession', () => {
     const session = makeSession([]);
     await expect(session.draw([text('')])).rejects.toThrow(/needs an id/);
   });
+
+  test('an injected clear keeps the whole session off the network', async () => {
+    const sent: DisplayDrawParams[] = [];
+    let cleared = 0;
+    const session = new DisplaySession({
+      applicationName: 'test_app',
+      priority: 50,
+      timeoutS: 90,
+      send: async (body) => { sent.push(body); },
+      clear: async () => { cleared++; },
+    });
+    await session.draw([text('a')]);
+    await session.clear();
+    expect(cleared).toBe(1);
+    // The clear forgot 'a': redrawing nothing afterwards owes no tombstone.
+    await session.draw([text('b')]);
+    expect(sent[1]!.elements.map((el) => el.id)).toEqual(['b']);
+  });
 });
