@@ -87,12 +87,16 @@ export function severityColor(pct: number): string {
   return COLORS.ok;
 }
 
+/** A channel outside [0, 255] doesn't just render wrong — its hex runs to
+ * one or three digits and corrupts the whole colour string. */
+const clampChannel = (value: number) => Math.min(255, Math.max(0, Math.round(value)));
+
 /** Alpha doesn't dim the LEDs (only r/g/b are read), so "darker" means scaling
  * the components themselves. Keeps the input's `#RRGGBBAA` shape, alpha FF. */
 export function scaleRgb(color: string, factor: number): string {
   let out = '#';
   for (let i = 1; i < 7; i += 2) {
-    out += Math.round(parseInt(color.slice(i, i + 2), 16) * factor)
+    out += clampChannel(parseInt(color.slice(i, i + 2), 16) * factor)
       .toString(16)
       .padStart(2, '0');
   }
@@ -107,7 +111,7 @@ export function mixRgb(a: string, b: string, t: number): string {
   for (let i = 1; i < 7; i += 2) {
     const va = parseInt(a.slice(i, i + 2), 16);
     const vb = parseInt(b.slice(i, i + 2), 16);
-    out += Math.round(va + (vb - va) * t)
+    out += clampChannel(va + (vb - va) * t)
       .toString(16)
       .padStart(2, '0');
   }

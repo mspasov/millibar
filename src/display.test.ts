@@ -40,6 +40,14 @@ describe('colour helpers', () => {
     expect(mixRgb('#33DD66FF', '#FF3322FF', 1)).toBe('#ff3322FF');
     expect(mixRgb('#00000000', '#FFFFFF00', 0.5)).toBe('#808080FF');
   });
+
+  test('out-of-range factors clamp instead of corrupting the hex', () => {
+    // Unclamped, 0xFF * 1.5 is 0x17E — three digits, an eleven-char colour.
+    expect(scaleRgb('#FF3322FF', 1.5)).toBe('#ff4d33FF');
+    expect(scaleRgb('#FF3322FF', -1)).toBe('#000000FF');
+    expect(mixRgb('#33DD66FF', '#FF3322FF', 1.5)).toBe('#ff0000FF');
+    expect(mixRgb('#33DD66FF', '#FF3322FF', -0.5)).toBe('#00ff88FF');
+  });
 });
 
 describe('textWidth', () => {
