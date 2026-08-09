@@ -152,7 +152,7 @@ interface ApiWindow {
   resets_at?: string | null;
 }
 
-interface ApiLimit {
+export interface ApiLimit {
   kind?: string;
   percent?: number;
   resets_at?: string | null;
@@ -181,11 +181,13 @@ function toWindow(w: ApiWindow | null | undefined): UsageWindow | null {
  * Unscoped session/weekly-all entries are already covered by fiveHour/sevenDay,
  * so they're skipped (they have no model scope).
  */
-function collectModelWindows(limits: ApiLimit[]): ModelWindow[] {
+export function collectModelWindows(limits: ApiLimit[]): ModelWindow[] {
   const windows = limits
     .map((l) => ({
       model: l.scope?.model?.display_name?.trim(),
-      window: windowFrom(l.percent ?? 0, l.resets_at),
+      // No `?? 0` fallback: a scoped limit missing its percent must drop the
+      // window (windowFrom returns null), not show a made-up 0% on screen.
+      window: windowFrom(l.percent, l.resets_at),
     }))
     .filter((e): e is { model: string; window: UsageWindow } => Boolean(e.model && e.window))
     .map(({ model, window }) => ({ model, ...window }))

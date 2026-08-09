@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tempDirs } from './test-util';
-import { dedupedFetchUsage, loadCachedUsage, saveCachedUsage, type Usage } from './usage';
+import { collectModelWindows, dedupedFetchUsage, loadCachedUsage, saveCachedUsage, type ApiLimit, type Usage } from './usage';
 
 const { tempDir, cleanup } = tempDirs('mbar-usage-');
 afterEach(cleanup);
@@ -74,6 +74,30 @@ describe('usage cache', () => {
     // A directory where the file should be: Bun.write cannot replace it.
     const path = tempDir();
     await expect(saveCachedUsage(usage, path)).resolves.toBeUndefined();
+  });
+});
+
+describe('collectModelWindows', () => {
+  test('a scoped limit without a percent is dropped, not shown as 0%', () => {
+    const limits: ApiLimit[] = [
+      { kind: 'weekly_scoped', scope: { model: { display_name: 'Fable' } } },
+      { kind: 'weekly_scoped', percent: 0, scope: { model: { display_name: 'Opus' } } },
+      { kind: 'weekly_scoped', percent: 12, resets_at: '2026-08-10T00:00:00Z', scope: { model: { display_name: 'Sonnet' } } },
+    ];
+    // A genuine 0% stays; only the missing value vanishes.
+    expect(collectModelWindows(limits)).toEqual([
+      { model: 'Opus', utilization: 0, resetsAt: null },
+      { model: 'Sonnet', utilization: 12, resetsAt: '2026-08-10T00:00:00Z' },
+    ]);
+  });
+
+  test('unscoped entries and duplicate models are filtered', () => {
+    const limits: ApiLimit[] = [
+      { kind: 'five_hour', percent: 62 },
+      { kind: 'weekly_scoped', percent: 5, scope: { model: { display_name: 'Fable' } } },
+      { kind: 'weekly_scoped', percent: 9, scope: { model: { display_name: 'Fable' } } },
+    ];
+    expect(collectModelWindows(limits)).toEqual([{ model: 'Fable', utilization: 5, resetsAt: null }]);
   });
 });
 
