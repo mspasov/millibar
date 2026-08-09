@@ -65,7 +65,7 @@ function parseCredentials(raw: string): Credentials | null {
   } catch {
     return null;
   }
-  const oauth = (parsed as Record<string, any>)?.claudeAiOauth;
+  const oauth = (parsed as { claudeAiOauth?: Record<string, unknown> } | null)?.claudeAiOauth;
   const accessToken = oauth?.accessToken ?? oauth?.access_token;
   if (typeof accessToken !== 'string' || accessToken.length === 0) return null;
 
