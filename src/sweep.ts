@@ -139,14 +139,14 @@ export class PctSweep {
  * shares the bar's rows — so a passing head reads on top. */
 export function sweepHead(
   frame: SweepFrame,
-  opts: { y: number; height: number; width: number }
+  opts: { y: number; height: number; width: number; x?: number }
 ): DrawElement {
   const fillWidth = Math.max(1, Math.round((opts.width * frame.pct) / 100));
   const color = frame.headColor && frame.pct > 0 ? frame.headColor : HIDDEN(WHITE);
   return {
     id: 'head',
     type: 'rectangle',
-    x: fillWidth - 1,
+    x: (opts.x ?? 0) + fillWidth - 1,
     y: opts.y,
     width: 1,
     height: opts.height,

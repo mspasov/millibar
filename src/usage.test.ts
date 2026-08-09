@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tempDirs } from './test-util';
-import { loadCachedUsage, saveCachedUsage, type Usage } from './usage';
+import { dedupedFetchUsage, loadCachedUsage, saveCachedUsage, type Usage } from './usage';
 
 const { tempDir, cleanup } = tempDirs('mbar-usage-');
 afterEach(cleanup);
@@ -74,5 +74,54 @@ describe('usage cache', () => {
     // A directory where the file should be: Bun.write cannot replace it.
     const path = tempDir();
     await expect(saveCachedUsage(usage, path)).resolves.toBeUndefined();
+  });
+});
+
+describe('dedupedFetchUsage', () => {
+  test('concurrent callers share one in-flight fetch', async () => {
+    let calls = 0;
+    const fetch = dedupedFetchUsage(60_000, async () => {
+      calls += 1;
+      await Bun.sleep(5);
+      return usage;
+    });
+    const [a, b] = await Promise.all([fetch(), fetch()]);
+    expect(calls).toBe(1);
+    expect(a).toBe(usage);
+    expect(b).toBe(usage);
+  });
+
+  test('within the TTL, later callers get the cached value without a request', async () => {
+    let calls = 0;
+    const fetch = dedupedFetchUsage(60_000, async () => {
+      calls += 1;
+      return usage;
+    });
+    await fetch();
+    await fetch();
+    expect(calls).toBe(1);
+  });
+
+  test('failures are cached like values — a sibling module must not re-provoke a 429', async () => {
+    let calls = 0;
+    const error = new Error('boom');
+    const fetch = dedupedFetchUsage(60_000, async () => {
+      calls += 1;
+      throw error;
+    });
+    await expect(fetch()).rejects.toBe(error);
+    await expect(fetch()).rejects.toBe(error);
+    expect(calls).toBe(1);
+  });
+
+  test('past the TTL, the next call fetches live again', async () => {
+    let calls = 0;
+    const fetch = dedupedFetchUsage(0, async () => {
+      calls += 1;
+      return usage;
+    });
+    await fetch();
+    await fetch();
+    expect(calls).toBe(2);
   });
 });

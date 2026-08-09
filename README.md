@@ -61,8 +61,8 @@ Each is usable on its own, not just by the monitor.
   [USAGE-API.md](docs/USAGE-API.md).
 - **`src/stats.ts`** — reads Claude Code's local stats cache, the per-day token history
   behind its own usage graphs (there is no server endpoint for history). Drawn by the
-  monitor's history module as stacked per-model bars over the last 30 or 7 days. See
-  [USAGE-GRAPH.md](docs/USAGE-GRAPH.md).
+  monitor's history module as stacked per-model bars over the last 30 or 7 days, plus an
+  all-time calendar heatmap. See [USAGE-GRAPH.md](docs/USAGE-GRAPH.md).
 - **`src/input.ts`** — `listenInput()` streams button, switch, and encoder events off the
   device's protobuf WebSocket. Decodes only the input field, so it needs no protobuf
   runtime.
@@ -85,20 +85,27 @@ Each is usable on its own, not just by the monitor.
 - **`src/module.ts`** — the `MonitorModule` contract and per-module scheduler.
 - **`src/host.ts`** — `runHost()` runs modules against one device: input routing, module
   switching, the heartbeat repaint, status-light ownership, shutdown.
-- **`src/modules/`** — the modules themselves: `claude-usage.ts`, `cpu.ts`.
+- **`src/modules/`** — the modules themselves: `claude-usage.ts`,
+  `claude-usage-combined.ts` (their shared fetch/state machinery lives in
+  `usage-poller.ts`), `claude-stats.ts`, `cpu.ts`.
 - **`src/mbar.ts`** — the entry point that registers modules with the host.
 
 ### Monitor behaviour
 
-One window at a time: a label, a dark-grey countdown to the window's reset, a percentage,
-and a progress bar recoloured by severity (green below 50%, amber below 80%, red above).
-The countdown (`4:59`, `6D4H`, `59M`) ticks once a minute and drops precision — or hides —
-when a long model label leaves it no room.
+Claude usage shows one window at a time: a label, a dark-grey countdown to the window's
+reset, a percentage, and a progress bar recoloured by severity (green below 50%, amber
+below 80%, red above). Its sibling module **combined usage** puts every window on one
+screen — one slim bar per window, under the same detail row for the selected window,
+whose bar runs at full brightness behind a two-pixel marker at the left edge while the
+other rows dim to 45%. The two modules share one deduplicated fetch, so the pair costs
+the rate-limited usage API no more than a single module would. The countdown (`4:59`,
+`6D4H`, `59M`) ticks once a minute and drops precision — or hides — when a long model
+label leaves it no room.
 
-A faint tick on the bar marks how much of the window has elapsed, so the bar reads as a
-race: fill ahead of the tick means tokens are going faster than time. Under pace the tick
-sits in the empty track, just lighter than it; over pace it sits submerged in the fill as
-a darker notch of the severity colour.
+A faint tick on each usage bar marks how much of that window has elapsed, so the bar
+reads as a race: fill ahead of the tick means tokens are going faster than time. Under
+pace the tick sits in the empty track, just lighter than it; over pace it sits submerged
+in the fill as a darker notch of the fill colour.
 
 Value changes animate rather than snap: the bar sweeps to its new fill with ease-out, the
 percentage rolls through the intermediate values, the severity colour crossfades when a
@@ -111,14 +118,15 @@ device actually sustains.
 
 - **Press the dial** (its press arrives as the `OK` button event — override with
   `SWITCH_BUTTON` if your press reports differently) to switch to the next module:
-  Claude usage → Claude history → CPU load → back. Each module keeps polling while
-  hidden, so switching always lands on fresh data, and each remembers which view it
-  was on.
+  Claude usage → combined usage → Claude history → CPU load → back. Each module keeps
+  polling while hidden, so switching always lands on fresh data, and each remembers
+  which view it was on.
 - **Rotate the encoder** to cycle the active module's views — `5H` → `7D` → per-model
-  windows (e.g. `FABLE`) on Claude usage, `30D`/`7D` history windows on Claude history,
-  `1M`/`5M`/`15M` load windows on CPU. The Claude usage list is rebuilt each poll, since
-  the API adds and drops model windows; the selection follows its label rather than its
-  index so a refresh never jumps you elsewhere.
+  windows (e.g. `FABLE`) on both usage modules (on combined usage the marker walks the
+  bars), `30D`/`7D` bars → `ALL` heatmap on Claude history, `1M`/`5M`/`15M` load windows
+  on CPU. The usage window list is rebuilt each poll, since the API adds and drops model
+  windows; the selection follows its label rather than its index so a refresh never
+  jumps you elsewhere.
 - **Press `START`** to refresh the active module immediately. Three cyan dots replace the
   countdown while fetching and the status light fades. During cooldown a press still
   repaints (without refetching), so a blank screen is always recoverable — every button

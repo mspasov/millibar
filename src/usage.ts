@@ -252,6 +252,43 @@ export async function fetchUsage(): Promise<Usage> {
 /** Raw body of the last fetch, for debugging shape drift in the undocumented API. */
 export let lastRawBody: unknown = null;
 
+/**
+ * Wraps fetchUsage so several monitor modules polling on the same cadence
+ * cost one request per cycle: concurrent calls share the in-flight fetch, and
+ * for `ttlMs` after it settles every caller gets the same outcome — value or
+ * error — without touching the network. The endpoint's rate budget is shared
+ * across the whole account (see USAGE-API.md), so N modules must not mean N
+ * requests. NoCredentialsError is cached like any other failure; it resolves
+ * by signing in, not by retrying faster.
+ */
+export function dedupedFetchUsage(ttlMs: number, impl: typeof fetchUsage = fetchUsage): typeof fetchUsage {
+  let settledAt = 0;
+  let outcome: { usage: Usage } | { error: unknown } | null = null;
+  let inflight: Promise<Usage> | null = null;
+  return () => {
+    if (inflight) return inflight;
+    if (outcome && Date.now() - settledAt < ttlMs) {
+      return 'usage' in outcome ? Promise.resolve(outcome.usage) : Promise.reject(outcome.error);
+    }
+    inflight = impl()
+      .then(
+        (usage) => {
+          outcome = { usage };
+          return usage;
+        },
+        (error: unknown) => {
+          outcome = { error };
+          throw error;
+        }
+      )
+      .finally(() => {
+        settledAt = Date.now();
+        inflight = null;
+      });
+    return inflight;
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Cache: the last successful read, persisted so a restart while the API is
 // down or rate-limited starts from the previous values (rendered stale)

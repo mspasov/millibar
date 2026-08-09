@@ -14,13 +14,17 @@ const usageFixture = (over: Partial<Usage> = {}): Usage => ({
   ...over,
 });
 
-const nullContext = (): ModuleContext => ({
-  requestRender: () => {},
-  pulseActivity: () => {},
-  log: () => {},
-  warn: () => {},
-  signal: new AbortController().signal,
-});
+const nullContext = (): ModuleContext => {
+  const context = {
+    applicationName: 'test_app',
+    requestRender: () => {},
+    pulseActivity: () => {},
+    log: () => {},
+    warn: () => {},
+    signal: new AbortController().signal,
+  };
+  return context;
+};
 
 const { tempDir: cacheDir, cleanup } = tempDirs('mbar-module-');
 afterEach(cleanup);

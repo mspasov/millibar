@@ -18,7 +18,9 @@ import { envNumber } from './config';
 import { runHost } from './host';
 import { claudeStatsModule } from './modules/claude-stats';
 import { claudeUsageModule } from './modules/claude-usage';
+import { claudeUsageCombinedModule } from './modules/claude-usage-combined';
 import { cpuModule } from './modules/cpu';
+import { dedupedFetchUsage } from './usage';
 
 // Validated, not just Number()-coerced: a NaN interval would make every
 // setTimeout fire immediately and hot-loop the rate-limited usage API.
@@ -28,8 +30,21 @@ import { cpuModule } from './modules/cpu';
 const POLL_INTERVAL_MS = envNumber('POLL_INTERVAL_MS', 10 * 60 * 1000, 1000);
 const REFRESH_COOLDOWN_MS = envNumber('REFRESH_COOLDOWN_MS', 5000, 0);
 
+// Both usage modules poll on the same cadence; the deduplicated fetcher makes
+// that one request per cycle against the rate-limited endpoint. The 30s TTL
+// covers the near-simultaneous twin polls (and puts a freshness floor under
+// START-refreshes) without holding data back longer than anyone would notice
+// at 1% granularity. The combined module is quiet — the primary usage module
+// logs each fetch's story once.
+const usageOptions = {
+  pollIntervalMs: POLL_INTERVAL_MS,
+  refreshCooldownMs: REFRESH_COOLDOWN_MS,
+  fetchUsageImpl: dedupedFetchUsage(30_000),
+};
+
 await runHost([
-  claudeUsageModule({ pollIntervalMs: POLL_INTERVAL_MS, refreshCooldownMs: REFRESH_COOLDOWN_MS }),
+  claudeUsageModule(usageOptions),
+  claudeUsageCombinedModule({ ...usageOptions, quiet: true }),
   claudeStatsModule(),
   cpuModule(),
 ]);
