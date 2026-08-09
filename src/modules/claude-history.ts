@@ -22,6 +22,19 @@
  * (p25/p50/p75 of nonzero days) Claude Code uses, so one monster day can't
  * flatten the rest of the map.
  *
+ * Each screen carries an appearance intro in the same asset (`intro-30d` …):
+ * bars rise oldest-to-newest behind a track wipe, tips glowing white until
+ * they land; the heatmap sweeps in week by week behind the same white edge.
+ * A screen switch draws the intro section, and a timer swaps the element to
+ * the static section once the intro has played — the intro ends on a ~1s
+ * hold of its final frame (identical to the static pixels), so the swap
+ * lands invisibly even with timer jitter. Every redraw of an animation
+ * element restarts its section (DEVICE.md), so a repaint during the
+ * sub-second intro replays it — the only uninvited repaint sources are the
+ * 60s heartbeat and a poll landing, and a rare replay is accepted over
+ * tracking draw counts. Prototyped and tuned on-device via
+ * tools/history-intro.ts, which previews and demos these exact frames.
+ *
  * Data is Claude Code's local stats cache (src/stats.ts), which only advances
  * when Claude Code itself recomputes it — so every screen anchors at the newest
  * day *in the data*, not calendar today: trailing days the cache hasn't seen
@@ -35,7 +48,7 @@
  * instant, unfailing — so like the CPU module there is no LED pulse and no
  * refresh hold. The asset re-uploads only when the cache's mtime moves.
  */
-import { encodeAnim } from '../anim';
+import { encodeAnim, type AnimSection } from '../anim';
 import { COLORS, DISPLAYS, HIDDEN, scaleRgb, type DrawElement } from '../display';
 import { wrapIndex, type ModuleContext, type MonitorModule, type PollResult } from '../module';
 import {
@@ -108,7 +121,29 @@ export const HEAT_ZERO = COLORS.track;
 
 export const ASSET_FILE = 'mbar-history.anim';
 
-interface HistoryScreen {
+/** Appearance pacing, in display frames at FPS. Bars: the dark track wipes
+ * in over TRACK_WIPE frames, bar i starts rising at INTRO_LEAD + i*stagger
+ * and grows for `grow` frames with an ease-out — a wave rolling toward
+ * today. Heat: week column w appears at HEAT_LEAD + w/HEAT_SWEEP, a scan
+ * line crossing the calendar. Both share the white leading edge: heat cells
+ * on arrival and bar tips while growing are mixed FLASH_MIX toward white,
+ * settling to their final colour over FLASH_DECAY frames. Tuned on-device
+ * (2026-08-09) via tools/history-intro.ts. */
+const FPS = 30;
+const TRACK_WIPE = 3;
+const INTRO_LEAD = 2;
+const HEAT_LEAD = 1;
+const HEAT_SWEEP = 1.5;
+export const FLASH_MIX = 0.55;
+export const FLASH_DECAY = 3;
+/** Final-frame hold appended to each intro section: the swap to the static
+ * section lands inside this window, where both show identical pixels. */
+const HOLD_FRAMES = 30;
+/** How long after the intro's duration the swap draw fires — enough for
+ * timer and draw latency, well inside the 1s hold. */
+const INTRO_SWAP_MARGIN_MS = 150;
+
+export interface HistoryScreen {
   label: string;
   /** Section name inside ASSET_FILE; screen switching is a section switch. */
   section: string;
@@ -116,13 +151,17 @@ interface HistoryScreen {
   days: number;
   barWidth: number;
   gap: number;
+  /** Intro: frames between consecutive bars starting to rise. */
+  stagger: number;
+  /** Intro: frames a single bar takes to reach full height. */
+  grow: number;
 }
 
 /** Bar screens right-align their newest bar to x=70, leaving a 1px margin. */
-const SCREENS: HistoryScreen[] = [
-  { label: '30D', section: '30d', kind: 'bars', days: 30, barWidth: 1, gap: 1 },
-  { label: '7D', section: '7d', kind: 'bars', days: 7, barWidth: 8, gap: 2 },
-  { label: 'ALL', section: 'heat', kind: 'heat', days: 0, barWidth: 0, gap: 0 },
+export const SCREENS: HistoryScreen[] = [
+  { label: '30D', section: '30d', kind: 'bars', days: 30, barWidth: 1, gap: 1, stagger: 0.4, grow: 6 },
+  { label: '7D', section: '7d', kind: 'bars', days: 7, barWidth: 8, gap: 2, stagger: 1.8, grow: 8 },
+  { label: 'ALL', section: 'heat', kind: 'heat', days: 0, barWidth: 0, gap: 0, stagger: 0, grow: 0 },
 ];
 
 // --- window shaping (shared with tests) -------------------------------------
@@ -304,6 +343,123 @@ export function paintHeatmap(days: DayTokens[]): Uint8Array {
   return frame;
 }
 
+// --- appearance intros --------------------------------------------------------
+
+const easeOutCubic = (u: number): number => 1 - (1 - u) ** 3;
+
+/** The bar screens' appearance: bars rising left-to-right. Each frame draws
+ * the final stack truncated to the eased height, so family colours appear
+ * bottom-up in their real order as the bar grows; the tip row glows white
+ * while rising and melts into the real colour once the bar lands. The final
+ * frame is pixel-identical to paintBars (tests assert it byte-for-byte). */
+export function introBarsFrames(window: DayTokens[], screen: HistoryScreen): Uint8Array[] {
+  if (window.length === 0) return [new Uint8Array(WIDTH * HEIGHT * 3)];
+  const ranked = rankFamilies(window);
+  const maxTotal = Math.max(...window.map((d) => d.total));
+  const span = screen.days * screen.barWidth + (screen.days - 1) * screen.gap;
+  const x0 = 71 - span;
+  const stacks = window.map((day) => stackSegments(day, ranked, maxTotal));
+  const starts = window.map((_, i) => INTRO_LEAD + i * screen.stagger);
+  const frameCount = Math.ceil(Math.max(...starts) + screen.grow + FLASH_DECAY) + 1;
+
+  const frames: Uint8Array[] = [];
+  for (let f = 0; f < frameCount; f++) {
+    const frame = new Uint8Array(WIDTH * HEIGHT * 3);
+    const trackW = Math.min(span, Math.round((span * (f + 1)) / TRACK_WIPE));
+    fillRect(frame, x0, CHART_BOTTOM, trackW, 1, COLORS.track);
+
+    window.forEach((_, i) => {
+      const u = (f - starts[i]!) / screen.grow;
+      const finalH = stacks[i]!.reduce((a, s) => a + s.height, 0);
+      if (u <= 0 || finalH === 0) return;
+      const h = Math.max(1, Math.round(finalH * easeOutCubic(Math.min(1, u))));
+      const x = x0 + i * (screen.barWidth + screen.gap);
+      let below = 0;
+      for (const segment of stacks[i]!) {
+        const take = Math.min(segment.height, h - below);
+        if (take <= 0) break;
+        fillRect(frame, x, CHART_BOTTOM - below - take + 1, screen.barWidth, take, segment.color);
+        below += take;
+      }
+      // (u - 1) * grow = frames since the bar reached full height.
+      const settle = u < 1 ? 0 : Math.min(1, ((u - 1) * screen.grow) / FLASH_DECAY);
+      const mix = FLASH_MIX * (1 - settle);
+      if (mix > 0) {
+        const yTip = CHART_BOTTOM - h + 1;
+        for (let dx = 0; dx < screen.barWidth; dx++) {
+          const o = (yTip * WIDTH + x + dx) * 3;
+          for (let c = 0; c < 3; c++) frame[o + c] = Math.round(frame[o + c]! + (255 - frame[o + c]!) * mix);
+        }
+      }
+    });
+    frames.push(frame);
+  }
+  return frames;
+}
+
+/** The heatmap's appearance: week columns sweeping in oldest-first. Cells
+ * flash on arrival — data cells mixed toward white, idle cells at a lifted
+ * grey (0x50, well clear of the 0x20 track's legibility floor, DEVICE.md) —
+ * and decay to their final colour, so a bright edge visibly crosses the
+ * calendar. The final frame is pixel-identical to paintHeatmap. */
+export function introHeatFrames(days: DayTokens[]): Uint8Array[] {
+  const span = heatSpan(days);
+  if (!span) return [new Uint8Array(WIDTH * HEIGHT * 3)];
+  const byDate = new Map(days.map((d) => [d.date, d]));
+  const firstDataMs = Date.parse(days[0]!.date);
+  const newestMs = Date.parse(days.at(-1)!.date);
+  const thresholds = heatThresholds(days.filter((d) => Date.parse(d.date) >= span.startMs));
+  const x0 = HEAT_RIGHT_X - (span.weeks * HEAT_PITCH_X - 1) + 1;
+
+  // The same walk as paintHeatmap, kept as a cell list so every frame can
+  // rescale each cell's colour by its age since appearance.
+  const cells: { x: number; y: number; week: number; r: number; g: number; b: number; idle: boolean }[] = [];
+  for (let ms = Math.max(span.startMs, firstDataMs); ms <= newestMs; ms += 86_400_000) {
+    const date = new Date(ms).toISOString().slice(0, 10);
+    const week = Math.floor((ms - span.startMs) / (7 * 86_400_000));
+    const level = heatLevel(byDate.get(date)?.total ?? 0, thresholds);
+    const color = level === 0 ? HEAT_ZERO : HEAT_COLORS[level - 1]!;
+    cells.push({
+      x: x0 + week * HEAT_PITCH_X,
+      y: HEAT_TOP_Y + new Date(ms).getUTCDay() * 2,
+      week,
+      r: parseInt(color.slice(1, 3), 16),
+      g: parseInt(color.slice(3, 5), 16),
+      b: parseInt(color.slice(5, 7), 16),
+      idle: level === 0,
+    });
+  }
+
+  const frameCount = Math.ceil(HEAT_LEAD + (span.weeks - 1) / HEAT_SWEEP + FLASH_DECAY) + 1;
+  const frames: Uint8Array[] = [];
+  for (let f = 0; f < frameCount; f++) {
+    const frame = new Uint8Array(WIDTH * HEIGHT * 3);
+    for (const cell of cells) {
+      const age = f - (HEAT_LEAD + cell.week / HEAT_SWEEP);
+      if (age < 0) continue;
+      const settle = Math.min(1, age / FLASH_DECAY);
+      let { r, g, b } = cell;
+      if (cell.idle) {
+        const grey = Math.round(0x20 + (0x50 - 0x20) * (1 - settle));
+        r = g = b = grey;
+      } else {
+        const mix = FLASH_MIX * (1 - settle);
+        r = Math.round(r + (255 - r) * mix);
+        g = Math.round(g + (255 - g) * mix);
+        b = Math.round(b + (255 - b) * mix);
+      }
+      for (let dx = 0; dx < HEAT_CELL_W; dx++) {
+        const o = (cell.y * WIDTH + cell.x + dx) * 3;
+        frame[o] = r;
+        frame[o + 1] = g;
+        frame[o + 2] = b;
+      }
+    }
+    frames.push(frame);
+  }
+  return frames;
+}
+
 // --- formatting ---------------------------------------------------------------
 
 /** Claude Code's y-axis notation, uppercased for the bitmap font. */
@@ -323,26 +479,40 @@ export function formatTokensShort(n: number): string {
 
 // --- the module ---------------------------------------------------------------
 
-/** One static frame per screen, each written twice so its section spans two
- * display frames (folded to one file frame of duration 2, so the duplicate is
- * ~free). Both halves of that shape are load-bearing, verified on-device
- * (firmware 1.1.1, DEVICE.md): a looping ONE-frame section is not honoured —
- * playback runs through the file and settles on its last frame, so every
- * screen showed the heatmap — and fps is the section-switch latency, since
- * switches land on a frame boundary (1 fps lagged the encoder by up to a
- * second; 30 fps is ~33ms while re-showing the same pixels). */
-export function encodeHistoryAsset(days: DayTokens[]): Uint8Array {
-  const frames = [
-    paintBars(windowDays(days, SCREENS[0]!.days), SCREENS[0]!),
-    paintBars(windowDays(days, SCREENS[1]!.days), SCREENS[1]!),
-    paintHeatmap(days),
-  ].flatMap((frame) => [frame, frame]);
-  return encodeAnim(frames, {
-    width: WIDTH,
-    height: HEIGHT,
-    fps: 30,
-    sections: SCREENS.map((screen, i) => ({ name: screen.section, start: 2 * i, end: 2 * i + 1 })),
-  });
+export interface HistoryAsset {
+  bytes: Uint8Array;
+  /** Intro playback duration per screen section — what the swap timer waits
+   * before switching the chart element to the static section. */
+  introMs: Record<string, number>;
+}
+
+/** Per screen: an `intro-<section>` (appearance frames plus a HOLD_FRAMES
+ * tail of the final frame — folded by the encoder, so the tail is ~free)
+ * followed by the static frame written twice so its section spans two
+ * display frames. Both halves of the static shape are load-bearing, verified
+ * on-device (firmware 1.1.1, DEVICE.md): a looping ONE-frame section is not
+ * honoured — playback runs through the file and settles on its last frame,
+ * so every screen showed the heatmap — and fps is the section-switch
+ * latency, since switches land on a frame boundary (1 fps lagged the encoder
+ * by up to a second; 30 fps is ~33ms while re-showing the same pixels). */
+export function encodeHistoryAsset(days: DayTokens[]): HistoryAsset {
+  const frames: Uint8Array[] = [];
+  const sections: AnimSection[] = [];
+  const introMs: Record<string, number> = {};
+  const push = (name: string, add: Uint8Array[]): void => {
+    sections.push({ name, start: frames.length, end: frames.length + add.length - 1 });
+    frames.push(...add);
+  };
+  for (const screen of SCREENS) {
+    const intro =
+      screen.kind === 'bars' ? introBarsFrames(windowDays(days, screen.days), screen) : introHeatFrames(days);
+    const still =
+      screen.kind === 'bars' ? paintBars(windowDays(days, screen.days), screen) : paintHeatmap(days);
+    push(`intro-${screen.section}`, [...intro, ...(Array(HOLD_FRAMES).fill(intro.at(-1)!) as Uint8Array[])]);
+    push(screen.section, [still, still]);
+    introMs[screen.section] = Math.round((intro.length / FPS) * 1000);
+  }
+  return { bytes: encodeAnim(frames, { width: WIDTH, height: HEIGHT, fps: FPS, sections }), introMs };
 }
 
 export interface ClaudeHistoryOptions {
@@ -355,6 +525,9 @@ export interface ClaudeHistoryOptions {
   todayImpl?: () => string;
   /** Asset transport, injectable for tests. */
   uploadImpl?: typeof assetsUpload;
+  /** Intro→static swap timer, returning a cancel — injectable so tests fire
+   * it by hand instead of waiting out real intros. */
+  scheduleImpl?: (fn: () => void, ms: number) => () => void;
 }
 
 export function claudeHistoryModule(options: ClaudeHistoryOptions = {}): MonitorModule {
@@ -363,6 +536,10 @@ export function claudeHistoryModule(options: ClaudeHistoryOptions = {}): Monitor
     statsPath = statsCachePath(),
     todayImpl = utcToday,
     uploadImpl = assetsUpload,
+    scheduleImpl = (fn, ms) => {
+      const timer = setTimeout(fn, ms);
+      return () => clearTimeout(timer);
+    },
   } = options;
   let ctx: ModuleContext | null = null;
   let history: StatsHistory | null = null;
@@ -373,6 +550,26 @@ export function claudeHistoryModule(options: ClaudeHistoryOptions = {}): Monitor
    * an animation element pointing at a path that was never uploaded must not
    * be drawn. */
   let uploadedMtimeMs: number | null = null;
+  /** Section the chart should play right now: `intro-…` while an appearance
+   * runs, null once settled (render falls back to the static section). */
+  let introSection: string | null = null;
+  let cancelIntroSwap: (() => void) | null = null;
+  let introDurations: Record<string, number> = {};
+
+  /** Arm the appearance for the active screen: the next render draws the
+   * intro section, and once it has played (margin inside the hold window)
+   * the element swaps to the static section. */
+  const startIntro = (): void => {
+    if (uploadedMtimeMs === null) return; // no chart element yet
+    const screen = SCREENS[screenIndex]!;
+    cancelIntroSwap?.();
+    introSection = `intro-${screen.section}`;
+    cancelIntroSwap = scheduleImpl(() => {
+      cancelIntroSwap = null;
+      introSection = null;
+      ctx?.requestRender();
+    }, introDurations[screen.section]! + INTRO_SWAP_MARGIN_MS);
+  };
 
   const load = (): void => {
     const loaded = loadStatsHistory(statsPath);
@@ -401,9 +598,15 @@ export function claudeHistoryModule(options: ClaudeHistoryOptions = {}): Monitor
   const syncAsset = async (): Promise<void> => {
     if (!ctx || !history || uploadedMtimeMs === history.modifiedAtMs) return;
     try {
-      await uploadImpl(ctx.applicationName, ASSET_FILE, encodeHistoryAsset(history.days));
+      const asset = encodeHistoryAsset(history.days);
+      await uploadImpl(ctx.applicationName, ASSET_FILE, asset.bytes);
+      const firstUpload = uploadedMtimeMs === null;
+      introDurations = asset.introMs;
       uploadedMtimeMs = history.modifiedAtMs;
       ctx.log(`uploaded ${ASSET_FILE}`);
+      // The chart's very first appearance animates too; later data
+      // re-uploads swap pixels under the element without replaying.
+      if (firstUpload) startIntro();
     } catch (error) {
       ctx.warn(`asset upload failed: ${(error as Error).message}`);
     }
@@ -424,6 +627,7 @@ export function claudeHistoryModule(options: ClaudeHistoryOptions = {}): Monitor
 
     init(context) {
       ctx = context;
+      context.signal.addEventListener('abort', () => cancelIntroSwap?.());
       // The runner renders before the first poll resolves; loading here makes
       // even that first frame carry the text (the chart follows the upload).
       load();
@@ -479,7 +683,10 @@ export function claudeHistoryModule(options: ClaudeHistoryOptions = {}): Monitor
           id: 'chart',
           type: 'animation',
           path: ASSET_FILE,
-          section: screen.section,
+          // Self-healing guard: a pending intro can only be the active
+          // screen's (onEncoder re-arms on every switch), but a mismatch
+          // must fall back to the static section, not play the wrong intro.
+          section: introSection === `intro-${screen.section}` ? introSection : screen.section,
           // loop:true is load-bearing even though the section is static: a
           // finished loop:false element ignores redraws entirely, so the
           // section could never switch again (verified on-device; DEVICE.md).
@@ -510,6 +717,7 @@ export function claudeHistoryModule(options: ClaudeHistoryOptions = {}): Monitor
 
     onEncoder(delta) {
       screenIndex = wrapIndex(screenIndex, delta, SCREENS.length);
+      startIntro();
       const screen = SCREENS[screenIndex]!;
       if (history) {
         ctx?.log(`-> ${screen.label} (${formatTokensCompact(windowTotal(screen))} tokens)`);

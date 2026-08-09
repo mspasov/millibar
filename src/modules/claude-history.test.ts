@@ -10,6 +10,7 @@ import {
   claudeHistoryModule,
   encodeHistoryAsset,
   FAMILY_COLORS,
+  FLASH_MIX,
   formatTokensCompact,
   formatTokensShort,
   HEAT_COLORS,
@@ -17,11 +18,14 @@ import {
   heatLevel,
   heatSpan,
   heatThresholds,
+  introBarsFrames,
+  introHeatFrames,
   modelFamily,
   OTHER_COLOR,
   paintBars,
   paintHeatmap,
   rankFamilies,
+  SCREENS,
   stackSegments,
   windowDays,
   type ClaudeHistoryOptions,
@@ -48,6 +52,19 @@ const px = (frame: Uint8Array, x: number, y: number): string => {
 };
 const rgb = (color: string): string => color.slice(0, 7).toUpperCase();
 const BLACK = '#000000';
+
+/** The module's flash formula: `#RRGGBB` mixed toward white. */
+const whiten = (color: string, mix: number): string =>
+  '#' +
+  [color.slice(1, 3), color.slice(3, 5), color.slice(5, 7)]
+    .map((h) => {
+      const v = parseInt(h, 16);
+      return Math.round(v + (255 - v) * mix)
+        .toString(16)
+        .padStart(2, '0');
+    })
+    .join('')
+    .toUpperCase();
 
 describe('windowDays', () => {
   test('anchors at the newest data day and zero-fills gaps', () => {
@@ -249,16 +266,77 @@ describe('formatting', () => {
   });
 });
 
+describe('intro frames', () => {
+  test('bars: the final frame is byte-identical to paintBars for every bar screen', () => {
+    const days = [day('2026-08-05', { 'claude-fable-5': 50, 'claude-opus-5': 20 }), day('2026-08-06', { 'claude-fable-5': 100 })];
+    for (const screen of SCREENS.filter((s) => s.kind === 'bars')) {
+      const window = windowDays(days, screen.days);
+      expect(introBarsFrames(window, screen).at(-1)!).toEqual(paintBars(window, screen));
+    }
+  });
+
+  test('bars: the track wipes in ahead of the bars', () => {
+    const window = windowDays([day('2026-08-06', { 'claude-fable-5': 100 })], 30);
+    const first = introBarsFrames(window, SCREENS[0]!)[0]!;
+    // Frame 0: a third of the baseline (x0=12), nothing above it yet.
+    expect(px(first, 12, 15)).toBe(rgb(COLORS.track));
+    expect(px(first, 70, 15)).toBe(BLACK);
+    expect(px(first, 70, 14)).toBe(BLACK);
+  });
+
+  test('bars: a rising bar wears a white tip, pure colour below it', () => {
+    // One full-height Fable day, 7D view: the newest bar (x=63..70) starts at
+    // frame 2 + 6*1.8 = 12.8, so frame 15 catches it mid-growth.
+    const window = windowDays([day('2026-08-06', { 'claude-fable-5': 100 })], 7);
+    const frame = introBarsFrames(window, SCREENS[1]!)[15]!;
+    let tipY = 0;
+    while (px(frame, 63, tipY) === BLACK) tipY++;
+    expect(tipY).toBeGreaterThan(6); // not yet at full height (rows 6..15)
+    expect(px(frame, 63, tipY)).toBe(whiten(rgb(FAMILY_COLORS.fable!), FLASH_MIX));
+    expect(px(frame, 63, tipY + 1)).toBe(rgb(FAMILY_COLORS.fable!));
+  });
+
+  test('heat: the final frame is byte-identical to paintHeatmap', () => {
+    const days = [
+      day('1970-01-04', { m: 1 }),
+      day('1970-01-05', { m: 2 }),
+      day('1970-01-06', { m: 3 }),
+      day('1970-01-07', { m: 4 }),
+    ];
+    expect(introHeatFrames(days).at(-1)!).toEqual(paintHeatmap(days));
+  });
+
+  test('heat: weeks sweep in oldest-first, flashing white then settling', () => {
+    // Two Sunday-anchored weeks (see paintHeatmap tests for the geometry).
+    const frames = introHeatFrames([day('1970-01-04', { m: 10 }), day('1970-01-12', { m: 10 })]);
+    const early = frames[1]!;
+    expect(px(early, 67, 1)).toBe(whiten(rgb(HEAT_COLORS[3]!), FLASH_MIX)); // Sun week 0, arriving
+    expect(px(early, 67, 3)).toBe('#505050'); // idle Mon week 0, lifted grey on arrival
+    expect(px(early, 70, 3)).toBe(BLACK); // week 1 not arrived yet
+  });
+});
+
 describe('encodeHistoryAsset', () => {
-  test('packs three sections into one device-native container', () => {
-    const data = encodeHistoryAsset([day('2026-08-06', { 'claude-fable-5': 100 })]);
-    expect(new TextDecoder().decode(data.slice(0, 8))).toBe('bicycle0');
-    expect(data.length).toBeGreaterThan(36);
+  test('packs an intro and a static section per screen into one container', () => {
+    const { bytes, introMs } = encodeHistoryAsset([day('2026-08-06', { 'claude-fable-5': 100 })]);
+    expect(new TextDecoder().decode(bytes.slice(0, 8))).toBe('bicycle0');
+    // Section names are nul-terminated in the sections chunk; the static
+    // name appears twice because the intro name ends with it.
+    const text = Buffer.from(bytes).toString('latin1');
+    const count = (s: string) => text.split(s).length - 1;
+    for (const screen of SCREENS) {
+      expect(count(`intro-${screen.section}\0`)).toBe(1);
+      expect(count(`${screen.section}\0`)).toBe(2);
+    }
+    expect(Object.keys(introMs).sort()).toEqual(['30d', '7d', 'heat']);
+    for (const ms of Object.values(introMs)) expect(ms).toBeGreaterThan(0);
   });
 });
 
 describe('module', () => {
   type Upload = { app: string; file: string; data: Uint8Array };
+
+  type Swap = { fn: () => void; ms: number; cancelled: boolean };
 
   function makeModule(
     days: DayTokens[] | null,
@@ -270,6 +348,7 @@ describe('module', () => {
     if (days) writeCache(path, days);
     let failures = failUploads;
     const warned: string[] = [];
+    const swaps: Swap[] = [];
     const module = claudeHistoryModule({
       statsPath: path,
       todayImpl: () => '2026-08-06',
@@ -279,6 +358,13 @@ describe('module', () => {
           throw new Error('device unreachable');
         }
         uploads.push({ app, file, data });
+      },
+      scheduleImpl: (fn, ms) => {
+        const swap: Swap = { fn, ms, cancelled: false };
+        swaps.push(swap);
+        return () => {
+          swap.cancelled = true;
+        };
       },
       ...over,
     });
@@ -290,7 +376,7 @@ describe('module', () => {
       warn: (m) => warned.push(m),
       signal: new AbortController().signal,
     } satisfies ModuleContext);
-    return { module, path, uploads, warned };
+    return { module, path, uploads, warned, swaps };
   }
 
   function writeCache(path: string, days: DayTokens[]): void {
@@ -321,37 +407,78 @@ describe('module', () => {
     expect(uploads).toHaveLength(2);
   });
 
-  test('renders text-only until the first upload lands, then the chart element', async () => {
-    const { module, warned } = makeModule([day('2026-08-06', { 'claude-fable-5': 100 })], {}, [], 1);
+  test('renders text-only until the first upload lands, then the chart appears via its intro', async () => {
+    const { module, warned, swaps } = makeModule([day('2026-08-06', { 'claude-fable-5': 100 })], {}, [], 1);
     await module.poll(); // upload fails
     expect(warned.some((m) => m.includes('upload failed'))).toBe(true);
     expect(byId(module.render({ refreshing: false }), 'chart')).toBeUndefined();
+    expect(swaps).toHaveLength(0); // no intro armed while there is no chart
 
-    await module.poll(); // retry succeeds
+    await module.poll(); // retry succeeds — first appearance animates
     const chart = byId(module.render({ refreshing: false }), 'chart');
-    expect(chart).toMatchObject({ type: 'animation', path: ASSET_FILE, section: '30d' });
+    expect(chart).toMatchObject({ type: 'animation', path: ASSET_FILE, section: 'intro-30d' });
+
+    swaps.at(-1)!.fn(); // the swap timer settles the element onto the static section
+    expect(byId(module.render({ refreshing: false }), 'chart').section).toBe('30d');
   });
 
-  test('encoder cycles 30D, 7D, ALL as section switches on one element id', async () => {
-    const { module } = makeModule([day('2026-08-06', { 'claude-fable-5': 100 })]);
+  test('encoder cycles 30D, 7D, ALL — each entered via its intro, settling static', async () => {
+    const { module, swaps } = makeModule([day('2026-08-06', { 'claude-fable-5': 100 })]);
     await module.poll();
+    swaps.at(-1)!.fn(); // settle the first appearance
     expect(byId(module.render({ refreshing: false }), 'label').text).toBe('30D');
 
     module.onEncoder!(1);
     let elements = module.render({ refreshing: false });
-    expect(byId(elements, 'chart').section).toBe('7d');
+    expect(byId(elements, 'chart').section).toBe('intro-7d');
     expect(byId(elements, 'label').text).toBe('7D');
+    swaps.at(-1)!.fn();
+    expect(byId(module.render({ refreshing: false }), 'chart').section).toBe('7d');
 
     module.onEncoder!(1);
     elements = module.render({ refreshing: false });
-    expect(byId(elements, 'chart').section).toBe('heat');
+    expect(byId(elements, 'chart').section).toBe('intro-heat');
     expect(byId(elements, 'label').text).toBe('ALL');
     // Heat text stacks in the left margin instead of the top row.
     expect(byId(elements, 'total')).toMatchObject({ align: 'mid_left', y: 8 });
     expect(byId(elements, 'age')).toMatchObject({ align: 'mid_left', y: 13 });
+    swaps.at(-1)!.fn();
+    expect(byId(module.render({ refreshing: false }), 'chart').section).toBe('heat');
 
     module.onEncoder!(1);
     expect(byId(module.render({ refreshing: false }), 'label').text).toBe('30D');
+  });
+
+  test('the swap timer waits out the intro and fires inside the hold window', async () => {
+    const days = [day('2026-08-06', { 'claude-fable-5': 100 })];
+    const { module, swaps } = makeModule(days);
+    await module.poll();
+    module.onEncoder!(1); // -> 7D
+    const introMs = encodeHistoryAsset(days).introMs['7d']!;
+    const swap = swaps.at(-1)!;
+    expect(swap.ms).toBeGreaterThan(introMs);
+    expect(swap.ms).toBeLessThan(introMs + 1000); // the 1s final-frame hold
+  });
+
+  test('spinning the encoder cancels the pending swap and re-arms for the new screen', async () => {
+    const { module, swaps } = makeModule([day('2026-08-06', { 'claude-fable-5': 100 })]);
+    await module.poll();
+    module.onEncoder!(1);
+    const first = swaps.at(-1)!;
+    module.onEncoder!(1);
+    expect(first.cancelled).toBe(true);
+    expect(byId(module.render({ refreshing: false }), 'chart').section).toBe('intro-heat');
+  });
+
+  test('a data re-upload mid-run does not replay the intro', async () => {
+    const { module, path, swaps } = makeModule([day('2026-08-06', { 'claude-fable-5': 100 })]);
+    await module.poll();
+    swaps.at(-1)!.fn(); // settle the first appearance
+    writeCache(path, [day('2026-08-06', { 'claude-fable-5': 100 }), day('2026-08-07', { 'claude-fable-5': 50 })]);
+    utimesSync(path, new Date(), new Date(Date.now() + 5000));
+    await module.poll();
+    expect(swaps).toHaveLength(1); // no new intro armed
+    expect(byId(module.render({ refreshing: false }), 'chart').section).toBe('30d');
   });
 
   test('every screen shares the same four element ids — the app stays tiny', async () => {

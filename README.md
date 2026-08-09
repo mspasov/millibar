@@ -34,6 +34,7 @@ it hangs or errors, see [Troubleshooting](#troubleshooting).
 | `bun run tools/plasma.ts [seconds]` | Generates, uploads, and plays a looping plasma animation. |
 | `bun run tools/flame.ts [start-level]` | **Flame.** Fire rises from the bottom; the dial sets its intensity (16 levels). Changes glide one level at a time, phase-matched, so they're smooth *and* immediate. `--preview [out.png]` renders a local contact sheet instead. |
 | `bun run tools/sweep.ts [targets...]` | Test bench for the monitor's percentage-change animation: eased bar sweep, white-hot leading edge, rolling counter, severity-colour lerp. Scripted (`10 47 85`), interactive (no args), or `--demo`; reports the frame rate the device actually sustains. |
+| `bun run tools/history-intro.ts [preview\|play]` | Test bench for the history module's appearance intros (bars rising with white tips, heatmap sweeping in). `preview` writes looping APNGs and an HTML page; `play` demos all three on the device and verifies the frames on the wire. |
 | `bun run tools/chime.ts [freqs-hz...]` | Synthesizes a chime, uploads it, and plays it on the speaker. |
 | `bun run tools/click.ts [--once]` | Clicks the speaker whenever the rotary dial moves. |
 | `bun run tools/screenshot.ts [out.png] [front\|back] [scale]` | Captures a display to PNG. |
