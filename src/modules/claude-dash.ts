@@ -32,7 +32,14 @@ import {
 } from '../display';
 import { PctSweep, sweepHead } from '../sweep';
 import { wrapIndex, type ModuleContext, type MonitorModule, type RenderFrame } from '../module';
-import { formatReset, paceTick, LimitPoller, type LimitModuleOptions, type Screen } from './limit-poller';
+import {
+  claudeUsageSource,
+  formatReset,
+  paceTick,
+  LimitPoller,
+  type LimitModuleOptions,
+  type Screen,
+} from './limit-poller';
 
 const WIDTH = DISPLAYS.front.width;
 
@@ -117,7 +124,7 @@ export function claudeDashModule(options: LimitModuleOptions): MonitorModule {
   });
   barSweep.set(0, severityColor(0));
 
-  const poller = new LimitPoller(options, (previousScreens) => {
+  const poller = new LimitPoller(claudeUsageSource, options, (previousScreens) => {
     // Keep the selection on the same window across refreshes even if the
     // list changed.
     const previousLabel = previousScreens[screenIndex]?.label;

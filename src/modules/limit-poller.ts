@@ -1,10 +1,15 @@
 /**
- * Shared machinery for the Claude gauge and dashboard modules: the limit
- * window list, the poll loop with its stale/back-off/cache behaviour, and
- * the pace tick. Each module owns a LimitPoller instance — separate stale
- * and back-off state — while the network fetch itself is deduplicated across
- * modules by `dedupedFetchUsage` (src/usage.ts), so two modules polling on
- * the same cadence cost the rate-limited endpoint one request per cycle.
+ * Shared machinery for the limit-window modules: the screen list, the poll
+ * loop with its stale/back-off/cache behaviour, and the pace tick. Each
+ * module owns a LimitPoller instance — separate stale and back-off state —
+ * while the network fetch itself is deduplicated across modules by
+ * `dedupedFetchUsage` (src/usage.ts), so two modules polling on the same
+ * cadence cost the rate-limited endpoint one request per cycle.
+ *
+ * The poller is generic over the provider: a `UsageSource<D>` supplies the
+ * fetch, the screen list, the cache, and which errors are fatal. Claude's
+ * source lives here (two modules share it); the Grok one lives with its
+ * module (src/modules/grok-gauge.ts).
  */
 import { COLORS, HIDDEN, scaleRgb, type DrawElement } from '../display';
 import { clockTime, formatDuration } from '../log';
@@ -110,7 +115,33 @@ export function paceTick(
   };
 }
 
-export interface LimitModuleOptions {
+/** Everything provider-specific about a limit poller. `D` is the provider's
+ * usage snapshot (Claude's `Usage`, Grok's `GrokWeeklyUsage`): fetched, turned
+ * into screens, and persisted as one unit. */
+export interface UsageSource<D> {
+  /** Live fetch — the default when the options carry no fetchUsageImpl. */
+  fetch: () => Promise<D>;
+  /** The screens a snapshot offers, rebuilt on every poll. */
+  screens: (data: D) => Screen[];
+  /** Cache of the last successful read; null on absent/corrupt/empty. */
+  loadCache: (path: string) => (D & { fetchedAt: Date }) | null;
+  saveCache: (data: D, path: string) => Promise<void>;
+  defaultCachePath: string;
+  /** Errors that only user action resolves (no credentials at all) — rethrown
+   * as fatal, so the host exits with the message instead of retrying into it. */
+  fatalError: (error: unknown) => boolean;
+}
+
+export const claudeUsageSource: UsageSource<Usage> = {
+  fetch: fetchUsage,
+  screens: buildScreens,
+  loadCache: loadCachedUsage,
+  saveCache: saveCachedUsage,
+  defaultCachePath: USAGE_CACHE_PATH,
+  fatalError: (error) => error instanceof NoCredentialsError,
+};
+
+export interface LimitModuleOptions<D = Usage> {
   pollIntervalMs: number;
   /** Floor between API fetches, so holding a button can't hammer the endpoint
    * into a 429. */
@@ -127,7 +158,7 @@ export interface LimitModuleOptions {
    * poller used to persist the identical result to the same path. */
   persist?: boolean;
   /** Injectable for tests, and how the modules share one deduplicated fetch. */
-  fetchUsageImpl?: typeof fetchUsage;
+  fetchUsageImpl?: () => Promise<D>;
   /** Skip the routine log lines (cache seed, summary, back-off, recovery) and
    * the failure warn. For a module sharing a deduplicated fetch with a
    * sibling: the primary module tells each story once. Fatal errors still
@@ -135,12 +166,12 @@ export interface LimitModuleOptions {
   quiet?: boolean;
 }
 
-export class LimitPoller {
+export class LimitPoller<D = Usage> {
   screens: Screen[] = [];
   stale = false;
   private ctx: ModuleContext | null = null;
   private readonly cachePath: string | null;
-  private readonly fetchImpl: typeof fetchUsage;
+  private readonly fetchImpl: () => Promise<D>;
   /** Consecutive 429s, escalating the back-off. Reset only by a successful
    * fetch — a network error in between says nothing about the rate limit. */
   private rateLimitStreak = 0;
@@ -154,15 +185,16 @@ export class LimitPoller {
   private lastSummary = '';
 
   constructor(
-    private readonly options: LimitModuleOptions,
+    private readonly source: UsageSource<D>,
+    private readonly options: LimitModuleOptions<D>,
     /** Called whenever screens or staleness changed — with the screen list from
      * before the change, so the module can re-find its selection by label
      * (the list is rebuilt every poll as model windows come and go) and
      * re-aim its animation. */
     private readonly onData: (previousScreens: Screen[]) => void
   ) {
-    this.cachePath = options.cachePath === undefined ? USAGE_CACHE_PATH : options.cachePath;
-    this.fetchImpl = options.fetchUsageImpl ?? fetchUsage;
+    this.cachePath = options.cachePath === undefined ? source.defaultCachePath : options.cachePath;
+    this.fetchImpl = options.fetchUsageImpl ?? source.fetch;
   }
 
   /** Remembers the module context and seeds from the last run's read, marked
@@ -172,9 +204,9 @@ export class LimitPoller {
   init(ctx: ModuleContext): void {
     this.ctx = ctx;
     if (!this.cachePath) return;
-    const cached = loadCachedUsage(this.cachePath);
+    const cached = this.source.loadCache(this.cachePath);
     if (!cached) return;
-    this.screens = buildScreens(cached);
+    this.screens = this.source.screens(cached);
     this.stale = true;
     this.onData([]);
     if (!this.options.quiet) {
@@ -191,11 +223,11 @@ export class LimitPoller {
     try {
       const usage = await this.fetchImpl();
       const previousScreens = this.screens;
-      this.screens = buildScreens(usage);
+      this.screens = this.source.screens(usage);
       this.stale = false;
       this.rateLimitStreak = 0;
       this.onData(previousScreens);
-      if (this.cachePath && (this.options.persist ?? true)) await saveCachedUsage(usage, this.cachePath);
+      if (this.cachePath && (this.options.persist ?? true)) await this.source.saveCache(usage, this.cachePath);
 
       if (this.failedPolls > 0) {
         if (!quiet) {
@@ -216,7 +248,7 @@ export class LimitPoller {
       }
       return { nextPollMs: pollIntervalMs, holdRefreshMs: refreshCooldownMs };
     } catch (error) {
-      if (error instanceof NoCredentialsError) throw error;
+      if (this.source.fatalError(error)) throw error;
 
       // Keep the last known values on screen, dimmed, rather than blanking.
       if (this.failedPolls === 0) this.staleSince = Date.now();
