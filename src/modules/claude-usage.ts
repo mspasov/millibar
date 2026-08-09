@@ -26,6 +26,7 @@ import {
   textWidth,
   type DrawElement,
 } from '../display';
+import { clockTime, formatDuration } from '../log';
 import { PctSweep, sweepHead } from '../sweep';
 import { wrapIndex, type ModuleContext, type MonitorModule, type PollResult, type RenderFrame } from '../module';
 import {
@@ -123,6 +124,14 @@ export function claudeUsageModule(options: ClaudeUsageOptions): MonitorModule {
   let views: View[] = [];
   let viewIndex = 0;
   let stale = false;
+  /** Consecutive polls without fresh data (failures and 429 back-offs alike),
+   * and when the stretch began — the material for the recovery line. */
+  let failedPolls = 0;
+  let staleSince = 0;
+  /** Utilization part of the last logged summary. At a 5-minute cadence an
+   * unchanged summary is ~288 near-identical lines a day, so only changes are
+   * worth a line. */
+  let lastSummary = '';
 
   const sweep = new PctSweep({
     durationMs: options.sweepMs,
@@ -159,7 +168,7 @@ export function claudeUsageModule(options: ClaudeUsageOptions): MonitorModule {
           views = buildViews(cached);
           stale = true;
           retarget();
-          ctx.log(`showing cached usage from ${cached.fetchedAt.toISOString()}`);
+          ctx.log(`showing cached usage from ${formatDuration(Date.now() - cached.fetchedAt.getTime())} ago`);
         }
       }
     },
@@ -177,15 +186,26 @@ export function claudeUsageModule(options: ClaudeUsageOptions): MonitorModule {
         retarget();
         if (cachePath) await saveCachedUsage(usage, cachePath);
 
+        if (failedPolls > 0) {
+          ctx?.log(
+            `recovered after ${formatDuration(Date.now() - staleSince)} stale ` +
+              `(${failedPolls} failed poll${failedPolls === 1 ? '' : 's'})`
+          );
+          failedPolls = 0;
+        }
         const summary = views.map((v) => `${v.label} ${v.window.utilization}%`).join(' | ');
-        const reset = currentView()?.window.resetsAt ?? null;
-        ctx?.log(`${summary} (${currentView()?.label}: ${formatReset(reset)})`);
+        if (summary !== lastSummary) {
+          lastSummary = summary;
+          const reset = currentView()?.window.resetsAt ?? null;
+          ctx?.log(`${summary} (${currentView()?.label}: ${formatReset(reset)})`);
+        }
         return { nextPollMs: pollIntervalMs, holdRefreshMs: refreshCooldownMs };
       } catch (error) {
         if (error instanceof NoCredentialsError) throw error;
 
         // Keep the last known values on screen, dimmed, rather than blanking.
-        ctx?.log((error as Error).message);
+        if (failedPolls === 0) staleSince = Date.now();
+        failedPolls += 1;
         stale = true;
         retarget();
         if (error instanceof RateLimitError) {
@@ -194,8 +214,13 @@ export function claudeUsageModule(options: ClaudeUsageOptions): MonitorModule {
           // Hold button-triggered refreshes off for the whole back-off, not
           // just the usual cooldown, so a 429 isn't immediately provoked again.
           const waitMs = Math.max(error.retryAfterSeconds * 1000, pollIntervalMs);
+          ctx?.log(`rate limited; showing stale values, next poll at ${clockTime(Date.now() + waitMs)} (refresh held)`);
           return { nextPollMs: waitMs, holdRefreshMs: waitMs };
         }
+        ctx?.warn(
+          `poll failed (${(error as Error).message}); showing stale values, ` +
+            `retrying in ${formatDuration(pollIntervalMs)}`
+        );
         ctx?.pulseActivity(COLORS.critical, FAIL_BLINK);
         return { nextPollMs: pollIntervalMs, holdRefreshMs: refreshCooldownMs };
       }

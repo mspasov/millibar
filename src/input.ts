@@ -18,6 +18,7 @@
  */
 
 import { deviceAddr, wsBase } from './config';
+import { clockTime } from './log';
 
 const BUTTONS = ['OK', 'BACK', 'START'] as const;
 const ACTIONS = ['PRESS', 'RELEASE'] as const;
@@ -152,6 +153,9 @@ export interface ListenOptions {
   signal?: AbortSignal;
   /** Called on transport errors; listening continues via reconnect. */
   onError?: (error: Error) => void;
+  /** Called on every successful (re)connect — the only positive signal the
+   * stream emits, so it's how a caller learns a reconnect loop ended. */
+  onConnect?: () => void;
 }
 
 /**
@@ -164,7 +168,7 @@ export async function listenInput(
   // wsBase: BUSY_BAR_ADDR may be a full http(s) URL, which must map to
   // ws(s)://, not be glued after "ws://".
   const base = wsBase(options.addr);
-  const { signal, onError } = options;
+  const { signal, onError, onConnect } = options;
 
   while (!signal?.aborted) {
     await new Promise<void>((resolve) => {
@@ -178,7 +182,10 @@ export async function listenInput(
         resolve();
       };
 
-      ws.onopen = () => ws.send(JSON.stringify({ enable: true }));
+      ws.onopen = () => {
+        onConnect?.();
+        ws.send(JSON.stringify({ enable: true }));
+      };
       ws.onmessage = (event) => {
         if (typeof event.data === 'string') return;
         for (const input of decodeInputEvents(new Uint8Array(event.data as ArrayBuffer))) {
@@ -214,7 +221,7 @@ if (import.meta.main) {
       'press buttons, turn the dial, or move the switch (Ctrl-C to stop)'
   );
   await listenInput(
-    (event) => console.log(`[${new Date().toLocaleTimeString()}] ${describe(event)}`),
-    { signal: controller.signal, onError: (e) => console.error(e.message) }
+    (event) => console.log(`${clockTime()} ${describe(event)}`),
+    { signal: controller.signal, onError: (e) => console.error(`${clockTime()} ${e.message}`) }
   );
 }

@@ -39,8 +39,12 @@ export interface ModuleContext {
    * firmware restarts the notification preset on every draw that carries a
    * colour, so exactly one module may drive it at a time. */
   pulseActivity(color: string, shape?: PulseShape): void;
-  /** Log a line, prefixed with the module id. */
+  /** Log a routine line, timestamped and prefixed with the module id. */
   log(message: string): void;
+  /** Log a failure — stderr, with identical repeats coalesced (src/log.ts).
+   * For polls that failed or data gone stale; a routine back-off (429) is not
+   * a fault and reads better via `log`. */
+  warn(message: string): void;
   /** Host lifetime — aborted on shutdown. */
   signal: AbortSignal;
 }

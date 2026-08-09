@@ -18,6 +18,7 @@ const nullContext = (): ModuleContext => ({
   requestRender: () => {},
   pulseActivity: () => {},
   log: () => {},
+  warn: () => {},
   signal: new AbortController().signal,
 });
 
@@ -137,6 +138,79 @@ describe('poll', () => {
     module.init?.({ ...nullContext(), pulseActivity: (color) => pulses.push(color) });
     await module.poll();
     expect(pulses).toEqual([COLORS.refresh]); // the fetch pulse only
+  });
+
+  test('a failed poll warns with the retry decision; recovery reports the stale stretch', async () => {
+    const logs: string[] = [];
+    const warns: string[] = [];
+    let fail = true;
+    const module = claudeUsageModule({
+      pollIntervalMs: 300_000,
+      refreshCooldownMs: 5_000,
+      sweepMs: 0,
+      sweepCoolMs: 0,
+      cachePath: null,
+      fetchUsageImpl: async () => {
+        if (fail) throw new Error('network down');
+        return usageFixture();
+      },
+    });
+    module.init?.({ ...nullContext(), log: (m) => logs.push(m), warn: (m) => warns.push(m) });
+
+    await module.poll();
+    expect(warns).toEqual(['poll failed (network down); showing stale values, retrying in 5m']);
+    expect(logs).toEqual([]);
+
+    fail = false;
+    await module.poll();
+    expect(logs[0]).toMatch(/^recovered after \d+s stale \(1 failed poll\)$/);
+  });
+
+  test('a 429 logs the back-off end as routine, not a warning', async () => {
+    const logs: string[] = [];
+    const warns: string[] = [];
+    const module = claudeUsageModule({
+      pollIntervalMs: 300_000,
+      refreshCooldownMs: 5_000,
+      sweepMs: 0,
+      sweepCoolMs: 0,
+      cachePath: null,
+      fetchUsageImpl: async () => {
+        throw new RateLimitError(900);
+      },
+    });
+    module.init?.({ ...nullContext(), log: (m) => logs.push(m), warn: (m) => warns.push(m) });
+
+    await module.poll();
+    expect(warns).toEqual([]);
+    expect(logs[0]).toMatch(/^rate limited; showing stale values, next poll at \d\d:\d\d:\d\d \(refresh held\)$/);
+  });
+
+  test('the summary logs only when a value changes', async () => {
+    const logs: string[] = [];
+    let utilization = 62;
+    const module = claudeUsageModule({
+      pollIntervalMs: 300_000,
+      refreshCooldownMs: 5_000,
+      sweepMs: 0,
+      sweepCoolMs: 0,
+      cachePath: null,
+      fetchUsageImpl: async () =>
+        usageFixture({
+          fiveHour: { utilization, resetsAt: new Date(Date.now() + 3_600_000).toISOString() },
+        }),
+    });
+    module.init?.({ ...nullContext(), log: (m) => logs.push(m) });
+
+    await module.poll();
+    await module.poll(); // unchanged values: no second line
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toContain('5H 62%');
+
+    utilization = 63;
+    await module.poll();
+    expect(logs).toHaveLength(2);
+    expect(logs[1]).toContain('5H 63%');
   });
 
   test('missing credentials are fatal', async () => {

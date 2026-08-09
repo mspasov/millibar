@@ -12,10 +12,16 @@ import { deviceAddr, envNumber } from './config';
 import { DisplaySession } from './display';
 import { listenInput, type Button, type InputEvent } from './input';
 import { pulseLed, type PulseShape } from './led';
+import { log, logError, logResolved } from './log';
 import { ModuleRunner, wrapIndex, type MonitorModule } from './module';
 
 const BUTTONS: readonly Button[] = ['OK', 'BACK', 'START'];
 const ADDR = deviceAddr();
+
+/** Domain errors (NoCredentialsError, …) set a custom `name` and carry their
+ * advice in the message; an error still wearing a built-in name is a bug,
+ * where the stack is the part worth keeping. */
+const BUILTIN_ERROR_NAMES = new Set(['Error', 'TypeError', 'RangeError', 'ReferenceError', 'SyntaxError']);
 
 export interface HostOptions {
   /** Kept as the historical 'claude_usage' by default: the device rejects
@@ -64,7 +70,13 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
     const elements = module
       .render({ refreshing: runner.refreshing })
       .map((el) => ({ ...el, id: `${module.id}.${el.id}` }));
-    void session.draw(elements).catch((e) => console.error((e as Error).message));
+    void session.draw(elements).then(
+      // A success closes any open draw incident — during a device outage the
+      // heartbeat fails once a minute, and the recovery line is the only
+      // signal that the display is back.
+      () => logResolved('draw'),
+      (e) => logError('draw', (e as Error).message)
+    );
   }
 
   const runners = modules.map(
@@ -74,7 +86,7 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
         () => {
           if (active().module === module) repaint();
         },
-        (message) => console.log(`[${module.id}] ${message}`)
+        (message) => log(module.id, message)
       )
   );
 
@@ -100,8 +112,17 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
       // Load-bearing: an uncaught rejection would skip every later pulse. Log
       // instead of swallowing — the light is otherwise unobservable, so this
       // is the only trace of a pulse that never ran (e.g. a bad colour).
-      .catch((e) => console.error(`status light: ${(e as Error).message}`));
+      .catch((e) => logError('led', (e as Error).message));
   }
+
+  // Before init: modules may log from init (e.g. the cached-usage seed), and
+  // the banner is the session-start marker those lines should follow.
+  log(
+    'host',
+    `millibar: ${modules.map((m) => m.title).join(', ')} on ${ADDR} — ` +
+      `press ${switchButton} (the dial) for the next module, START to refresh, ` +
+      'rotate the encoder to cycle views (Ctrl-C to stop and clear)'
+  );
 
   modules.forEach((module, index) => {
     module.init?.({
@@ -111,7 +132,8 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
       pulseActivity: (color, shape) => {
         if (activeIndex === index) pulseStatusLight(color, shape, () => activeIndex === index);
       },
-      log: (message) => console.log(`[${module.id}] ${message}`),
+      log: (message) => log(module.id, message),
+      warn: (message) => logError(module.id, message),
       signal: controller.signal,
     });
   });
@@ -122,7 +144,7 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
       if (event.action !== 'PRESS') return;
       if (event.button === switchButton && modules.length > 1) {
         activeIndex = wrapIndex(activeIndex, 1, modules.length);
-        console.log(`-> ${active().module.title}`);
+        log('host', `-> ${active().module.title}`);
         repaint();
       } else if (event.button === 'START') {
         active().requestRefresh('START pressed');
@@ -159,18 +181,15 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
     });
   }
 
-  console.log(
-    `millibar: ${modules.map((m) => m.title).join(', ')} on ${ADDR} — ` +
-      `press ${switchButton} (the dial) for the next module, START to refresh, ` +
-      'rotate the encoder to cycle views (Ctrl-C to stop and clear)'
-  );
-
   try {
     await Promise.all([
       ...runners.map((runner) => runner.run(controller.signal)),
       listenInput(handleInput, {
         signal: controller.signal,
-        onError: (e) => console.error(e.message),
+        onError: (e) => logError('input', e.message),
+        // The socket erroring every 2 s reconnect is coalesced above; a
+        // successful reconnect is the moment to say the outage ended.
+        onConnect: () => logResolved('input'),
       }),
     ]);
   } catch (error) {
@@ -178,7 +197,8 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
     // stop everything, leave the display clean, and exit non-zero. As on
     // SIGINT, the LED chain drains before the clear.
     controller.abort();
-    console.error((error as Error).message);
+    const expected = error instanceof Error && !BUILTIN_ERROR_NAMES.has(error.name);
+    logError('host', expected ? (error as Error).message : ((error as Error)?.stack ?? String(error)));
     await ledChain.catch(() => {});
     await session.clear().catch(() => {});
     process.exitCode = 1;
