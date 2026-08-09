@@ -7,7 +7,7 @@ import { tempDirs } from './test-util';
 
 // Same hygiene as connection.test.ts: never touch the real config or let a
 // leaked BUSY_BAR_ADDR change what candidateRoutes sees.
-const ENV_KEYS = ['MBAR_CONFIG', 'BUSY_BAR_ADDR', 'BUSY_BAR_TOKEN', 'BUSY_BAR_PASSWORD', 'XDG_CONFIG_HOME'];
+const ENV_KEYS = ['MBAR_CONFIG', 'BUSY_BAR_ADDR', 'BUSY_BAR_ROUTE', 'BUSY_BAR_TOKEN', 'BUSY_BAR_PASSWORD', 'XDG_CONFIG_HOME'];
 const savedEnv: Record<string, string | undefined> = {};
 const { tempDir, cleanup } = tempDirs('mbar-device-cli-');
 
@@ -121,6 +121,21 @@ describe('probe', () => {
   });
 });
 
+describe('routes', () => {
+  test('prints bare names, one per line, exit 0', async () => {
+    await runDeviceCommand('set', ['cloud', 'https://api.busy.app']);
+    const lines: string[] = [];
+    const realLog = console.log;
+    console.log = (line: string) => lines.push(line);
+    try {
+      expect(await runDeviceCommand('routes', [])).toBe(0);
+    } finally {
+      console.log = realLog;
+    }
+    expect(lines).toEqual(['usb', 'lan', 'cloud']);
+  });
+});
+
 describe('mbar entry point', () => {
   const repoRoot = join(import.meta.dir, '..');
 
@@ -130,6 +145,31 @@ describe('mbar entry point', () => {
     const out = result.stdout.toString();
     expect(out).toContain('mbar probe');
     expect(out).toContain('BUSY_BAR_ADDR');
+    expect(out).toContain('BUSY_BAR_ROUTE');
+  });
+
+  test('--route reaches route selection from any argv position', () => {
+    // End-to-end through the flag-stripping in mbar.ts: a bogus forced name
+    // must surface as the connection error, not as an unknown command.
+    const result = Bun.spawnSync(['bun', 'run', 'src/mbar.ts', 'probe', '--route', 'nope'], {
+      cwd: repoRoot,
+      env: { ...process.env, MBAR_CONFIG: join(tempDir(), 'config.json') },
+    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain("no route named 'nope'");
+
+    const eq = Bun.spawnSync(['bun', 'run', 'src/mbar.ts', '--route=nope', 'probe'], {
+      cwd: repoRoot,
+      env: { ...process.env, MBAR_CONFIG: join(tempDir(), 'config.json') },
+    });
+    expect(eq.exitCode).toBe(1);
+    expect(eq.stderr.toString()).toContain("no route named 'nope'");
+  });
+
+  test('--route without a value exits 1 with guidance', () => {
+    const result = Bun.spawnSync(['bun', 'run', 'src/mbar.ts', '--route'], { cwd: repoRoot });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain('--route needs a value');
   });
 
   test('an unknown command exits 1 with the usage on stderr', () => {

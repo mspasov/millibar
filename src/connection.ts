@@ -10,25 +10,34 @@
  * unplugged mid-run → LAN → cloud) without a restart.
  *
  * Config lives at `~/.config/mbar/config.json` (`MBAR_CONFIG` or
- * `XDG_CONFIG_HOME` move it). `BUSY_BAR_ADDR` still overrides everything and
- * is trusted verbatim *without* probing — that keeps echo-server debugging
- * and the wire-level tests, which point it at fakes that don't serve
- * `/api/version`, working unchanged.
+ * `XDG_CONFIG_HOME` move it). `BUSY_BAR_ROUTE` (or `mbar --route`) narrows
+ * selection to the named config routes, in the given order — still probed,
+ * so a forced-but-dead route fails loudly instead of hanging draws.
+ * `BUSY_BAR_ADDR` still overrides everything — including `BUSY_BAR_ROUTE` —
+ * and is trusted verbatim *without* probing; that keeps echo-server
+ * debugging and the wire-level tests, which point it at fakes that don't
+ * serve `/api/version`, working unchanged.
  *
  * Credentials (both optional, see DEVICE.md):
  * - `password` — the device's HTTP Access Password. Sent as an `X-API-Token`
  *   header; WebSockets can't carry headers, so there it becomes an
  *   `x-api-token` query parameter (busy-lib's LocalStateStream does the same).
  * - `token` — a cloud API token from https://cloud.busy.app/api-tokens, sent
- *   as `Authorization: Bearer …` to the `https://api.busy.app` proxy.
+ *   as `Authorization: Bearer …` to the `https://api.busy.app` proxy. It must
+ *   carry the "BUSY Bar" scope — an Account-scope token gets 403s that look
+ *   identical to an invalid token (DEVICE.md, Authentication).
  * The file can hold credentials, hence it is written 0600.
+ *
+ * The proxy serves the device API under `/busybar/…`, not `/api/…`, so every
+ * request path is translated per-route via `apiPath` at the last moment —
+ * callers write `/api/…` regardless of which route wins.
  */
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { BusyBar } from '@busy-app/busy-lib';
-import { DEFAULT_ADDR, httpBase } from './config';
+import { apiPath, DEFAULT_ADDR, httpBase } from './config';
 
 export interface Route {
   /** Short label, e.g. 'usb', 'lan', 'cloud'. Unique within the config. */
@@ -122,16 +131,37 @@ export function saveDeviceConfig(cfg: DeviceConfig): string {
   return path;
 }
 
+/** `BUSY_BAR_ROUTE='cloud'` or `'cloud,lan'` — the named config routes, in
+ * the given order. A name the config doesn't have is a loud error: a typo'd
+ * force silently falling back to usb would defeat the point of forcing. */
+function forcedRoutes(routes: Route[]): Route[] {
+  const forced = process.env.BUSY_BAR_ROUTE;
+  const names = (forced ?? '').split(',').map((n) => n.trim()).filter(Boolean);
+  if (names.length === 0) return routes;
+  const byName = new Map(routes.map((route) => [route.name, route]));
+  return names.map((name) => {
+    const route = byName.get(name);
+    if (!route) {
+      throw new Error(
+        `BUSY_BAR_ROUTE/--route: no route named '${name}' — config has ${routes.map((r) => r.name).join(', ')}`
+      );
+    }
+    return route;
+  });
+}
+
 /** The routes a resolve will try, in order — config file plus env overlay.
- * `BUSY_BAR_ADDR` replaces the whole list with one unprobed route;
- * `BUSY_BAR_TOKEN` / `BUSY_BAR_PASSWORD` fill credential gaps either way. */
+ * `BUSY_BAR_ROUTE` narrows the list to the named routes (still probed);
+ * `BUSY_BAR_ADDR` replaces the whole list with one unprobed route and wins
+ * over it; `BUSY_BAR_TOKEN` / `BUSY_BAR_PASSWORD` fill credential gaps
+ * either way. */
 export function candidateRoutes(): Route[] {
   const token = process.env.BUSY_BAR_TOKEN || undefined;
   const password = process.env.BUSY_BAR_PASSWORD || undefined;
   const addr = process.env.BUSY_BAR_ADDR;
   const routes = addr
     ? [{ name: 'env', addr }]
-    : loadDeviceConfig().routes;
+    : forcedRoutes(loadDeviceConfig().routes);
   return routes.map((route) => ({
     ...route,
     token: route.token ?? token,
@@ -158,7 +188,7 @@ export async function probeRoute(route: Route): Promise<Connection> {
   const base = httpBase(route.addr);
   let response: Response;
   try {
-    response = await fetch(`${base}/api/version`, {
+    response = await fetch(`${base}${apiPath(route.addr, '/api/version')}`, {
       headers: authHeaders(route),
       signal: AbortSignal.timeout(route.probe_timeout_ms ?? DEFAULT_PROBE_TIMEOUT_MS),
     });
@@ -183,8 +213,9 @@ let memo: { key: string; promise: Promise<Connection> } | undefined;
  * flipping BUSY_BAR_ADDR between operations) expects the next resolve to see
  * the new world, and MBAR_CONFIG moves the file itself. */
 function memoKey(): string {
-  const { BUSY_BAR_ADDR, BUSY_BAR_TOKEN, BUSY_BAR_PASSWORD, MBAR_CONFIG, XDG_CONFIG_HOME } = process.env;
-  return [BUSY_BAR_ADDR, BUSY_BAR_TOKEN, BUSY_BAR_PASSWORD, MBAR_CONFIG, XDG_CONFIG_HOME].join('|');
+  const { BUSY_BAR_ADDR, BUSY_BAR_ROUTE, BUSY_BAR_TOKEN, BUSY_BAR_PASSWORD, MBAR_CONFIG, XDG_CONFIG_HOME } =
+    process.env;
+  return [BUSY_BAR_ADDR, BUSY_BAR_ROUTE, BUSY_BAR_TOKEN, BUSY_BAR_PASSWORD, MBAR_CONFIG, XDG_CONFIG_HOME].join('|');
 }
 
 /** Drop the resolved connection so the next call re-probes. Called
@@ -236,7 +267,8 @@ async function resolveFresh(): Promise<Connection> {
   }
   throw new Error(
     `no BUSY Bar reachable — ${failures.join('; ')}. ` +
-      `Routes come from ${process.env.BUSY_BAR_ADDR ? 'BUSY_BAR_ADDR' : configPath()}; ` +
+      `Routes come from ${process.env.BUSY_BAR_ADDR ? 'BUSY_BAR_ADDR' : configPath()}` +
+      `${!process.env.BUSY_BAR_ADDR && process.env.BUSY_BAR_ROUTE ? ` (forced to '${process.env.BUSY_BAR_ROUTE}' by BUSY_BAR_ROUTE/--route)` : ''}; ` +
       `'mbar probe' shows each route's status.`
   );
 }
@@ -257,7 +289,7 @@ export function describeConnection(conn: Connection): string {
 export async function deviceFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const conn = await resolveConnection();
   try {
-    return await fetch(`${conn.base}${path}`, {
+    return await fetch(`${conn.base}${apiPath(conn.route.addr, path)}`, {
       ...init,
       headers: { ...conn.headers, ...((init.headers as Record<string, string>) ?? {}) },
     });
@@ -273,7 +305,7 @@ export async function deviceFetch(path: string, init: RequestInit = {}): Promise
  * `x-api-token` query parameter (headers aren't available to `WebSocket`). */
 export async function wsUrl(path: string): Promise<string> {
   const conn = await resolveConnection();
-  const url = new URL(`${conn.ws}${path}`);
+  const url = new URL(`${conn.ws}${apiPath(conn.route.addr, path)}`);
   const secret = conn.route.password ?? conn.route.token;
   if (secret) url.searchParams.set('x-api-token', secret);
   return url.toString();

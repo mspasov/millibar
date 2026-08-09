@@ -17,7 +17,7 @@
  * Usage: bun run src/input.ts
  */
 
-import { wsBase } from './config';
+import { isProxyAddr, wsBase } from './config';
 import { describeConnection, invalidateConnection, resolveConnection, wsUrl } from './connection';
 import { clockTime } from './log';
 
@@ -176,12 +176,32 @@ export async function listenInput(
     // Re-resolved on every attempt: after a drop the winning route may have
     // changed (USB unplugged mid-run → lan), and a resolve failure just means
     // the device is off — back off and keep trying, like any disconnect.
-    const url = explicitBase
-      ? `${explicitBase}/api/status/ws`
-      : await wsUrl('/api/status/ws').catch((error: Error) => {
-          onError?.(error);
-          return undefined;
-        });
+    let url: string | undefined;
+    let addr = options.addr;
+    if (explicitBase) {
+      url = `${explicitBase}/api/status/ws`;
+    } else {
+      // Resolved explicitly (not just via wsUrl) because the proxy check
+      // below needs the route's addr; wsUrl reuses the memoized resolve.
+      const conn = await resolveConnection().catch((error: Error) => {
+        onError?.(error);
+        return undefined;
+      });
+      if (conn) {
+        addr = conn.route.addr;
+        url = await wsUrl('/api/status/ws');
+      }
+    }
+
+    // The cloud proxy 403s WebSocket upgrades at its edge — any path, any
+    // auth (DEVICE.md, Authentication) — so attempting one would fail in a
+    // way that looks like a dead route and invalidate a perfectly healthy
+    // HTTP connection every 2 s. Skip it; logError coalesces the repeats,
+    // and a later failover to a local route picks input back up.
+    if (url !== undefined && addr !== undefined && isProxyAddr(addr)) {
+      onError?.(new Error('no button input over the cloud proxy — it rejects WebSocket upgrades'));
+      url = undefined;
+    }
 
     if (url !== undefined) {
       // The query string may carry x-api-token — never put it in an error.

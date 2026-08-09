@@ -15,7 +15,7 @@ timer, and supports custom apps. It is controllable over HTTP, MQTT, and BLE.
 |---|---|---|
 | Local (USB-Ethernet / LAN) | `http://10.0.4.20` | Default device IP |
 | Local hostname | `http://busy.bar/` | Resolves to the same device |
-| Remote proxy | `https://api.busy.app` | Requires API token from <https://cloud.busy.app/api-tokens> |
+| Remote proxy | `https://api.busy.app` | Device API under `/busybar/*`; needs a **BUSY Bar-scope** [API token](https://cloud.busy.app/api-tokens) — Account-scope tokens only unlock `/timer/v1/*`. See Authentication |
 
 - The device serves its own OpenAPI spec: **`http://10.0.4.20/openapi.yaml`** (~50 endpoints).
 - CORS is wide open (`Access-Control-Allow-Origin: *`) — browser apps can call the API directly.
@@ -30,12 +30,43 @@ Two independent credential kinds (both optional; from busy-lib source and README
   requests; WebSockets can't carry headers, so there it becomes an `x-api-token` **query
   parameter** (busy-lib `LocalStateStream` uses `HTTPAccessPassword ?? token` for it).
   Untested on hardware — this device has no password configured.
-- **Cloud API token** (the `https://api.busy.app` proxy): `Authorization: Bearer <token>`,
-  issued at <https://cloud.busy.app/api-tokens>. The proxy serves the same `/api/*` paths
-  as the device, so a client only swaps the base URL. Observed 2026-08-09: an *invalid*
-  token gets `HTTP 404` from `https://api.busy.app/api/version`, not 401 — the proxy
-  appears to route token → device and treats an unknown token as "no such device".
-  End-to-end proxy access is unverified here (no real token on this machine).
+- **Cloud API tokens** (`https://api.busy.app`): `Authorization: Bearer <token>`, issued at
+  <https://cloud.busy.app/api-tokens>. Verified on the wire 2026-08-09 with a real token —
+  the cloud picture is *not* "same API, different base URL":
+  - The proxy does **not** serve the device's `/api/*` paths (any `/api/*` request → 404,
+    token or not). The device API is proxied under the **`/busybar/`** prefix instead
+    (busy-lib's `BusyBar/index.js` picks `/busybar/` when the addr matches
+    `api(.dev|.test|.stage)?.busy.app`, else `/api/`).
+  - **Tokens carry a scope chosen at creation** (docs:
+    <https://docs.busy.app/bar/dev/api-tokens>), and the scope decides which API answers:
+    - **BUSY Bar scope** → the full device API under `/busybar/*` (~48 endpoints, spec:
+      <https://api.busy.app/busybar/openapi.yaml>, interactive docs at
+      <https://api.busy.app/busybar/docs>; securityScheme: "BUSY Cloud BAR-scope API
+      token"). Spec version matches the device's `api_semver` (25.0.0).
+    - **Account scope** → the cloud's own "BUSY App HTTP API v1"
+      (<https://api.busy.app/openapi.json>, docs at <https://api.busy.app/docs>):
+      `/timer/v1/snapshot` and `/timer/v1/profiles` (GET/PUT each) — account-level timer
+      state, not the device HTTP API.
+  - A wrong-scope (or garbage) token gets `HTTP 403` with body `null`; missing auth gets
+    `401 {"detail":"Not authenticated"}`. Observed with an Account-scope token:
+    `GET /timer/v1/snapshot` → 200 with the live snapshot, `GET /busybar/version` → 403.
+    The scope is invisible in the token string — a 403 here means "check the scope at
+    cloud.busy.app", not necessarily "bad token".
+  - **WebSocket upgrades are blocked at the proxy's edge** (2026-08-09), even though the
+    spec lists `/busybar/status/ws`. Adding `Connection: Upgrade` + `Upgrade: websocket`
+    headers turns *any* path into a bare Cloudflare `403` with an empty body — including
+    `/busybar/version` with a valid BAR token, which answers 200 to the same request
+    without those headers. Bearer header, `x-api-token` query, and no-auth all fail
+    identically (Bun reports close code 1002). Nothing client-side fixes this; button
+    input and state streaming are local-route only, and `listenInput` deliberately skips
+    proxy routes rather than hammering a doomed upgrade (which would invalidate a
+    healthy HTTP connection every 2 s).
+  - This repo handles the difference transparently: `apiPath` in `src/config.ts` rewrites
+    `/api/…` → `/busybar/…` for proxy addrs, and `httpBase` defaults them to https (the
+    proxy 301s plain http, which would drop POST bodies). The `cloud` route just needs a
+    **BUSY Bar-scope** token. Verified end-to-end 2026-08-09: `mbar probe` shows cloud ok
+    (api 25.0.0, ~330ms RTT), and `tools/screenshot.ts` captured the framebuffer through
+    the proxy.
 - The remote **state stream** is not the local one behind a different base URL: busy-lib's
   `RemoteStateStream` speaks JSON (not protobuf), subscribes per device GUID
   (`{type: "SUBSCRIBE", guid}`), and refreshes tokens on expiry. This repo's raw protobuf

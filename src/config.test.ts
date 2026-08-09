@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { envNumber, httpBase, wsBase } from './config';
+import { apiPath, envNumber, httpBase, isProxyAddr, wsBase } from './config';
 
 describe('httpBase / wsBase', () => {
   test('bare IPs and hostnames get a scheme prefixed', () => {
@@ -18,6 +18,36 @@ describe('httpBase / wsBase', () => {
     // silently cost mbar all of its button input under a full-URL addr.
     expect(wsBase('http://10.0.4.20')).toBe('ws://10.0.4.20');
     expect(wsBase('https://busy.bar/')).toBe('wss://busy.bar');
+  });
+});
+
+describe('cloud proxy addressing', () => {
+  test('recognises the proxy hosts, with or without a scheme', () => {
+    expect(isProxyAddr('api.busy.app')).toBe(true);
+    expect(isProxyAddr('https://api.busy.app')).toBe(true);
+    expect(isProxyAddr('https://api.busy.app/')).toBe(true);
+    expect(isProxyAddr('api.dev.busy.app')).toBe(true);
+    expect(isProxyAddr('10.0.4.20')).toBe(false);
+    expect(isProxyAddr('busy.bar')).toBe(false);
+    // Lookalikes must not match — 'napi.busy.app' is somebody else's host.
+    expect(isProxyAddr('napi.busy.app')).toBe(false);
+  });
+
+  test('the proxy defaults to https; a 301 would drop POST bodies', () => {
+    expect(httpBase('api.busy.app')).toBe('https://api.busy.app');
+    expect(wsBase('api.busy.app')).toBe('wss://api.busy.app');
+    // An explicit scheme is still respected.
+    expect(httpBase('http://api.busy.app')).toBe('http://api.busy.app');
+  });
+
+  test('apiPath rewrites /api/… to /busybar/… only for proxy routes', () => {
+    expect(apiPath('api.busy.app', '/api/version')).toBe('/busybar/version');
+    expect(apiPath('api.busy.app', '/api/display/draw?application_name=x')).toBe(
+      '/busybar/display/draw?application_name=x'
+    );
+    expect(apiPath('10.0.4.20', '/api/version')).toBe('/api/version');
+    // Only a leading /api segment is a device-API path.
+    expect(apiPath('api.busy.app', '/apiary')).toBe('/apiary');
   });
 });
 
@@ -49,3 +79,4 @@ describe('envNumber', () => {
     expect(() => envNumber(NAME, 42, 1000)).toThrow('>= 1000');
   });
 });
+

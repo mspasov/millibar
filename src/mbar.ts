@@ -11,10 +11,11 @@
  * subcommands. Adding a monitor means writing one module file and
  * registering it here.
  *
- * Usage: mbar [--help | probe | show | init | set | rm | order] (after
- *        `bun link`), or bun run src/mbar.ts — no arguments runs the monitor
- * Env:   BUSY_BAR_ADDR, BUSY_BAR_TOKEN, BUSY_BAR_PASSWORD, MBAR_CONFIG,
- *        BUSY_PRIORITY, POLL_INTERVAL_MS, REFRESH_COOLDOWN_MS,
+ * Usage: mbar [--route <names>] [--help | probe | routes | show | init |
+ *        set | rm | order] (after `bun link`), or bun run src/mbar.ts —
+ *        no arguments runs the monitor
+ * Env:   BUSY_BAR_ADDR, BUSY_BAR_ROUTE, BUSY_BAR_TOKEN, BUSY_BAR_PASSWORD,
+ *        MBAR_CONFIG, BUSY_PRIORITY, POLL_INTERVAL_MS, REFRESH_COOLDOWN_MS,
  *        SWITCH_BUTTON (which button the dial press reports as; default OK)
  */
 import { envNumber } from './config';
@@ -26,7 +27,28 @@ import { claudeHistoryModule } from './modules/claude-history';
 import { cpuModule } from './modules/cpu';
 import { dedupedFetchUsage } from './usage';
 
-const [command, ...args] = process.argv.slice(2);
+// Flags work on any invocation (monitor or subcommand) and anywhere in the
+// argv, so they're stripped before command dispatch. Each becomes its env
+// var — one mechanism, two spellings — with the flag winning over an
+// inherited env var.
+const argv = process.argv.slice(2);
+for (let i = argv.length - 1; i >= 0; i--) {
+  const arg = argv[i]!;
+  if (arg === '--route') {
+    const value = argv[i + 1];
+    if (value === undefined) {
+      console.error('--route needs a value: config route name(s), comma-separated — see mbar routes');
+      process.exit(1);
+    }
+    process.env.BUSY_BAR_ROUTE = value;
+    argv.splice(i, 2);
+  } else if (arg.startsWith('--route=')) {
+    process.env.BUSY_BAR_ROUTE = arg.slice('--route='.length);
+    argv.splice(i, 1);
+  }
+}
+
+const [command, ...args] = argv;
 
 if (command === '--help' || command === '-h' || command === 'help') {
   console.log(mbarUsage());

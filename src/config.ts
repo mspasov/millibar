@@ -20,9 +20,28 @@ export function deviceAddr(explicit?: string): string {
   return explicit ?? process.env.BUSY_BAR_ADDR ?? DEFAULT_ADDR;
 }
 
-/** `http://…` base URL for the device, without a trailing slash. */
+/** The cloud proxy hosts, per busy-lib's PROXY_HOST_RE. The proxy is not
+ * "the device at another address": it defaults to https, and it serves the
+ * device API under `/busybar/…` — `/api/…` there is a 404 no matter the
+ * token (see DEVICE.md, Authentication). */
+const PROXY_HOST_RE = /^api(?:\.(?:dev|test|stage))?\.busy\.app$/i;
+
+export function isProxyAddr(addr: string): boolean {
+  const host = addr.replace(/^https?:\/\//i, '').replace(/[/:?#].*$/, '');
+  return PROXY_HOST_RE.test(host);
+}
+
+/** Device API path for an address: `/api/…` locally, `/busybar/…` through
+ * the proxy. Callers keep writing `/api/…` everywhere. */
+export function apiPath(addr: string, path: string): string {
+  return isProxyAddr(addr) ? path.replace(/^\/api(?=\/|$)/, '/busybar') : path;
+}
+
+/** `http://…` base URL for the device, without a trailing slash. The proxy
+ * gets https by default (it redirects plain http). */
 export function httpBase(addr = deviceAddr()): string {
-  const url = /^https?:\/\//.test(addr) ? addr : `http://${addr}`;
+  const scheme = isProxyAddr(addr) ? 'https' : 'http';
+  const url = /^https?:\/\//.test(addr) ? addr : `${scheme}://${addr}`;
   return url.replace(/\/+$/, '');
 }
 

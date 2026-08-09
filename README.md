@@ -38,7 +38,7 @@ it hangs or errors, see [Troubleshooting](#troubleshooting).
 | `bun run tools/chime.ts [freqs-hz...]` | Synthesizes a chime, uploads it, and plays it on the speaker. |
 | `bun run tools/click.ts [--once]` | Clicks the speaker whenever the rotary dial moves. |
 | `bun run tools/screenshot.ts [out.png] [front\|back] [scale]` | Captures a display to PNG. |
-| `mbar probe\|show\|init\|set\|rm\|order` | **Connection config.** Manages the persistent route list (USB / LAN / cloud, with credentials) and probes which route answers. See [Connecting](#connecting-to-the-device). |
+| `mbar probe\|routes\|show\|init\|set\|rm\|order` | **Connection config.** Manages the persistent route list (USB / LAN / cloud, with credentials) and probes which route answers. `--route <names>` forces a run onto specific routes. See [Connecting](#connecting-to-the-device). |
 | `bbar` (or `bun run tools/bbar.ts`) | **Storage CLI.** Browse and manage the device's 7 GB `/ext` partition and per-app assets: `ls`/`df`/`cat`/`get`/`put`/`mv`/`mkdir`/`rm`, plus `apps`/`push`/`wipe` for asset directories. `bbar help` for the full list. |
 
 ## Connecting to the device
@@ -63,24 +63,35 @@ credentials; without it the `usb` + `lan` defaults above apply):
 
 ```sh
 mbar probe        # every route's status, and which one wins
+mbar routes       # just the route names, one per line
 mbar set cloud https://api.busy.app --token <token>
 mbar set lan 192.168.1.50 --first   # add/update, move to front
 mbar show|init|rm <name>|order <name...>
 mbar --help       # full usage, including the monitor and env vars
 ```
 
+To force a run onto specific routes without editing the config, name them:
+`mbar --route cloud` runs the monitor over the proxy, `mbar probe --route
+cloud,lan` probes those two in that order. The flag is `BUSY_BAR_ROUTE` in
+env form, which every script in the repo honours. Forced routes are still
+probed — a dead forced route is a loud error, not a silent fallback — while
+`BUSY_BAR_ADDR` stays the unprobed escape hatch and wins over both.
+
 Credentials, both optional, per route:
 
 - `--token` — a cloud API token from <https://cloud.busy.app/api-tokens>,
   sent as `Authorization: Bearer …`. Required for the `api.busy.app` proxy
-  route (an invalid token surfaces as `HTTP 404` from the proxy).
+  route, and it must be created with the **BUSY Bar** access scope — an
+  Account-scope token gets the same `HTTP 403` as an invalid one, and the
+  scope can't be inspected after creation (see DEVICE.md, Authentication).
 - `--password` — the device's HTTP Access Password (web UI: Settings → HTTP
   Access), sent as an `X-API-Token` header (`x-api-token` query parameter on
   WebSockets). Only needed if you enabled that setting.
 
-Caveat: the monitor's *button input* over the cloud proxy is untested — the
-proxy's state stream speaks a different protocol (JSON, subscribe-by-GUID)
-than the device's local protobuf WebSocket. Drawing, audio, and storage go
+Caveat: there is no *button input* over the cloud proxy — it rejects every
+WebSocket upgrade at its edge (verified: any path 403s the moment the
+Upgrade headers appear, valid token or not), so the monitor reports input
+unavailable and runs without the dial. Drawing, audio, and storage go
 through plain HTTP and work the same over any route.
 
 ## Configuration
@@ -89,7 +100,8 @@ All via environment variables; every one has a working default.
 
 | Variable | Default | Applies to |
 |---|---|---|
-| `BUSY_BAR_ADDR` | unset | bypasses the route config: talk to exactly this IP/hostname/URL, unprobed |
+| `BUSY_BAR_ADDR` | unset | bypasses the route config: talk to exactly this IP/hostname/URL, unprobed (wins over `BUSY_BAR_ROUTE`) |
+| `BUSY_BAR_ROUTE` | unset | force selection to these config routes — comma-separated names, tried in that order, still probed. Same as `mbar --route` |
 | `BUSY_BAR_TOKEN` | unset | cloud token for routes that don't carry their own |
 | `BUSY_BAR_PASSWORD` | unset | HTTP Access Password for routes that don't carry their own |
 | `MBAR_CONFIG` | `~/.config/mbar/config.json` | where the route config lives |

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { decodeInputEvents } from './input';
+import { decodeInputEvents, listenInput } from './input';
 
 // Hand-rolled protobuf encoding, mirroring the wire format the device sends:
 // BSB_State.State { 2: StateUpdate { 11: InputEvent { 1: button | 2: switch |
@@ -101,5 +101,25 @@ describe('decodeInputEvents', () => {
     // Unwalkable wire type 3 (deprecated group).
     expect(decodeInputEvents(new Uint8Array([(1 << 3) | 3, 0xff]))).toEqual([]);
     expect(decodeInputEvents(new Uint8Array([]))).toEqual([]);
+  });
+});
+
+describe('listenInput', () => {
+  test('skips the cloud proxy instead of hammering a blocked WebSocket', async () => {
+    // The proxy 403s every WebSocket upgrade at its edge (DEVICE.md), so an
+    // attempt would fail looking like a dead route. The listener must report
+    // why — once, coalescably — and never open a socket (this test would
+    // otherwise hit the real proxy).
+    const errors: string[] = [];
+    const controller = new AbortController();
+    await listenInput(() => {}, {
+      addr: 'api.busy.app',
+      signal: controller.signal,
+      onError: (error) => {
+        errors.push(error.message);
+        controller.abort();
+      },
+    });
+    expect(errors).toEqual(['no button input over the cloud proxy — it rejects WebSocket upgrades']);
   });
 });

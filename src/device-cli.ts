@@ -19,7 +19,7 @@ import {
   type Route,
 } from './connection';
 
-export const DEVICE_COMMANDS = ['probe', 'show', 'init', 'set', 'rm', 'order'] as const;
+export const DEVICE_COMMANDS = ['probe', 'routes', 'show', 'init', 'set', 'rm', 'order'] as const;
 export type DeviceCommand = (typeof DEVICE_COMMANDS)[number];
 
 export function isDeviceCommand(command: string): command is DeviceCommand {
@@ -39,6 +39,7 @@ Monitor (the default — no arguments):
 Connection routes (config: ${configPath()}):
 
   mbar probe             try every route, report status and latency
+  mbar routes            list the route names, one per line
   mbar show              print the config (credentials masked)
   mbar init              write the config file with the defaults
   mbar set <name> <addr> [--token T] [--password P] [--timeout MS] [--first]
@@ -47,13 +48,21 @@ Connection routes (config: ${configPath()}):
 
 Routes are tried in order; the first whose /api/version answers like a BUSY
 device wins. 'set' adds or updates a route (--first puts it at the top).
+--route <name[,name...]> on any invocation forces this run to just the named
+route(s), in that order, still probed — 'mbar --route cloud' runs the monitor
+over the proxy, 'mbar probe --route cloud,lan' probes those two. Equivalent
+to BUSY_BAR_ROUTE; the flag wins.
 Credentials: --token is a cloud API token (https://cloud.busy.app/api-tokens,
-for the https://api.busy.app route); --password is the device's HTTP Access
-Password if one is configured.
+for the https://api.busy.app route — create it with the "BUSY Bar" scope, an
+Account-scope token 403s); --password is the device's HTTP Access Password if
+one is configured.
 
 Environment:
 
   BUSY_BAR_ADDR          bypass the route config — exact address, unprobed
+                         (wins over BUSY_BAR_ROUTE/--route)
+  BUSY_BAR_ROUTE         force these config route(s), comma-separated — what
+                         --route sets; honoured by every script in the repo
   BUSY_BAR_TOKEN         cloud token for routes that don't carry their own
   BUSY_BAR_PASSWORD      HTTP Access Password, likewise
   MBAR_CONFIG            route config path
@@ -72,7 +81,10 @@ function describeRoute(route: Route): string {
 
 async function probeAll(): Promise<number> {
   const routes = candidateRoutes();
-  console.log(`config: ${process.env.BUSY_BAR_ADDR ? 'BUSY_BAR_ADDR override' : fileNote()}`);
+  const forced = !process.env.BUSY_BAR_ADDR && process.env.BUSY_BAR_ROUTE;
+  console.log(
+    `config: ${process.env.BUSY_BAR_ADDR ? 'BUSY_BAR_ADDR override' : fileNote()}${forced ? ` — forced to ${forced}` : ''}`
+  );
   let winner: string | undefined;
   for (const route of routes) {
     const startedAt = Date.now();
@@ -99,6 +111,11 @@ function show(): void {
   for (const route of loadDeviceConfig().routes) {
     console.log(`  ${describeRoute(route)}${route.probe_timeout_ms ? ` timeout ${route.probe_timeout_ms}ms` : ''}`);
   }
+}
+
+/** Bare names on stdout — for scripting and for picking a --route value. */
+function listRoutes(): void {
+  for (const route of loadDeviceConfig().routes) console.log(route.name);
 }
 
 function set(args: string[]): void {
@@ -178,6 +195,9 @@ export async function runDeviceCommand(command: DeviceCommand, args: string[]): 
     switch (command) {
       case 'probe':
         return await probeAll();
+      case 'routes':
+        listRoutes();
+        return 0;
       case 'show':
         show();
         return 0;
