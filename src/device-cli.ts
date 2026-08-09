@@ -33,11 +33,16 @@ Monitor (the default — no arguments):
 
   mbar                   switchable monitor modules on the BUSY Bar display.
                          Press the dial to switch modules, START to refresh,
-                         rotate the encoder to cycle screens. Ctrl-C stops and
-                         clears the display.
+                         rotate the encoder to cycle screens, BACK twice to
+                         quit. Ctrl-C also stops and clears the display.
+  --modules <names>      which modules run, comma-separated, in cycle order:
+                         gauge, dash, history, cpu. The first named is the
+                         startup screen; unset runs all four. Equivalent to
+                         MBAR_MODULES.
   --no-animations        still everything that moves: value changes snap
                          instead of sweeping, history screens skip their
-                         intros. Equivalent to ANIMATIONS=off; the flag wins
+                         intros, quitting skips the turn-off farewell.
+                         Equivalent to ANIMATIONS=off; the flag wins
                          (--animations overrides an inherited off).
 
 Connection routes (config: ${configPath()}):

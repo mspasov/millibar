@@ -1,5 +1,48 @@
 import { describe, expect, test } from 'bun:test';
-import { MIN_INDICATOR_MS, ModuleRunner, wrapIndex, type MonitorModule, type PollResult } from './module';
+import {
+  MIN_INDICATOR_MS,
+  ModuleRunner,
+  selectModules,
+  wrapIndex,
+  type ModuleChoice,
+  type MonitorModule,
+  type PollResult,
+} from './module';
+
+describe('selectModules', () => {
+  const roster: ModuleChoice<string>[] = [
+    { aliases: ['gauge', 'claude-gauge'], value: 'G' },
+    { aliases: ['dash', 'claude-dash'], value: 'D' },
+    { aliases: ['cpu'], value: 'C' },
+  ];
+
+  test('preserves the given order — it is the cycle order', () => {
+    expect(selectModules('cpu,gauge', roster)).toEqual(['C', 'G']);
+    expect(selectModules('gauge,dash,cpu', roster)).toEqual(['G', 'D', 'C']);
+  });
+
+  test('accepts full ids, mixed case, and stray whitespace/commas', () => {
+    expect(selectModules('Claude-Gauge, CPU,', roster)).toEqual(['G', 'C']);
+  });
+
+  test('a single module is a valid selection', () => {
+    expect(selectModules('dash', roster)).toEqual(['D']);
+  });
+
+  test('an unknown name throws with the canonical names listed', () => {
+    expect(() => selectModules('gauge,typo', roster)).toThrow("unknown module 'typo' — valid: gauge, dash, cpu");
+  });
+
+  test('the same module twice throws, even under two aliases', () => {
+    expect(() => selectModules('gauge,cpu,gauge', roster)).toThrow("'gauge' is listed twice");
+    expect(() => selectModules('gauge,claude-gauge', roster)).toThrow("'gauge' is listed twice");
+  });
+
+  test('an empty spec throws rather than selecting nothing', () => {
+    expect(() => selectModules('', roster)).toThrow('empty selection');
+    expect(() => selectModules(' , ', roster)).toThrow('empty selection');
+  });
+});
 
 describe('wrapIndex', () => {
   test('wraps in both directions, including multi-step deltas', () => {

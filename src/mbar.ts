@@ -12,11 +12,14 @@
  * subcommands. Adding a monitor means writing one module file and
  * registering it here.
  *
- * Usage: mbar [--route <names>] [--[no-]animations] [--help | probe |
- *        routes | show | init | set | rm | order] (after `bun link`), or
- *        bun run src/mbar.ts — no arguments runs the monitor
+ * Usage: mbar [--route <names>] [--modules <names>] [--[no-]animations]
+ *        [--help | probe | routes | show | init | set | rm | order]
+ *        (after `bun link`), or bun run src/mbar.ts — no arguments runs
+ *        the monitor with every module
  * Env:   BUSY_BAR_ADDR, BUSY_BAR_ROUTE, BUSY_BAR_TOKEN, BUSY_BAR_PASSWORD,
  *        MBAR_CONFIG, BUSY_PRIORITY, POLL_INTERVAL_MS, REFRESH_COOLDOWN_MS,
+ *        MBAR_MODULES (which modules run, comma-separated, in cycle order:
+ *        gauge, dash, history, cpu — unset runs all),
  *        SWITCH_BUTTON (which button the dial press reports as; default OK),
  *        ANIMATIONS (off disables the sweeps, the history intros, and
  *        the quit prompt's drain and turn-off farewell)
@@ -24,6 +27,7 @@
 import { envFlag, envNumber } from './config';
 import { isDeviceCommand, mbarUsage, runDeviceCommand } from './device-cli';
 import { runHost } from './host';
+import { selectModules } from './module';
 import { claudeDashModule } from './modules/claude-dash';
 import { claudeGaugeModule } from './modules/claude-gauge';
 import { claudeHistoryModule } from './modules/claude-history';
@@ -47,6 +51,17 @@ for (let i = argv.length - 1; i >= 0; i--) {
     argv.splice(i, 2);
   } else if (arg.startsWith('--route=')) {
     process.env.BUSY_BAR_ROUTE = arg.slice('--route='.length);
+    argv.splice(i, 1);
+  } else if (arg === '--modules') {
+    const value = argv[i + 1];
+    if (value === undefined) {
+      console.error('--modules needs a value: module name(s), comma-separated — gauge, dash, history, cpu');
+      process.exit(1);
+    }
+    process.env.MBAR_MODULES = value;
+    argv.splice(i, 2);
+  } else if (arg.startsWith('--modules=')) {
+    process.env.MBAR_MODULES = arg.slice('--modules='.length);
     argv.splice(i, 1);
   } else if (arg === '--animations' || arg === '--no-animations') {
     // The bare positive spelling exists to override an ANIMATIONS=off
@@ -100,12 +115,28 @@ const usageOptions = {
   ...sweepOptions,
 };
 
+// The full roster, in default cycle order. `--modules gauge,cpu` (or
+// MBAR_MODULES) narrows and reorders it — the first name is the startup
+// screen. Factories, not instances: only selected modules get constructed,
+// so a deselected module does no polling and no setup.
+const roster = [
+  { aliases: ['gauge', 'claude-gauge'], value: () => claudeGaugeModule(usageOptions) },
+  { aliases: ['dash', 'claude-dash'], value: () => claudeDashModule({ ...usageOptions, quiet: true }) },
+  { aliases: ['history', 'claude-history'], value: () => claudeHistoryModule({ intros: ANIMATIONS }) },
+  { aliases: ['cpu'], value: () => cpuModule(sweepOptions) },
+];
+
+let selected = roster.map((choice) => choice.value);
+if (process.env.MBAR_MODULES) {
+  try {
+    selected = selectModules(process.env.MBAR_MODULES, roster);
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
 await runHost(
-  [
-    claudeGaugeModule(usageOptions),
-    claudeDashModule({ ...usageOptions, quiet: true }),
-    claudeHistoryModule({ intros: ANIMATIONS }),
-    cpuModule(sweepOptions),
-  ],
+  selected.map((make) => make()),
   { animations: ANIMATIONS }
 );

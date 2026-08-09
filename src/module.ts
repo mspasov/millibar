@@ -79,6 +79,46 @@ export function wrapIndex(index: number, delta: number, length: number): number 
   return (((index + delta) % length) + length) % length;
 }
 
+/** One selectable entry: every name in `aliases` picks the same module. The
+ * first alias is the canonical one, used when listing valid names. */
+export interface ModuleChoice<T> {
+  aliases: string[];
+  value: T;
+}
+
+/**
+ * Parses a module selection (mbar --modules / MBAR_MODULES): comma-separated
+ * names, case-insensitive, whitespace-tolerant. The given order is preserved
+ * — it defines the dial cycle, and the first name is the startup screen.
+ * Unknown and duplicate names (including the same module under two aliases)
+ * throw with the canonical names listed, so a typo is loud rather than a
+ * silently missing screen.
+ */
+export function selectModules<T>(spec: string, choices: ModuleChoice<T>[]): T[] {
+  const canonical = choices.map((c) => c.aliases[0]).join(', ');
+  const names = spec
+    .split(',')
+    .map((n) => n.trim().toLowerCase())
+    .filter((n) => n !== '');
+  if (names.length === 0) {
+    throw new Error(`--modules/MBAR_MODULES: empty selection — valid: ${canonical}`);
+  }
+  const picked = new Set<ModuleChoice<T>>();
+  const selection: T[] = [];
+  for (const name of names) {
+    const choice = choices.find((c) => c.aliases.includes(name));
+    if (!choice) {
+      throw new Error(`--modules/MBAR_MODULES: unknown module '${name}' — valid: ${canonical}`);
+    }
+    if (picked.has(choice)) {
+      throw new Error(`--modules/MBAR_MODULES: '${choice.aliases[0]}' is listed twice`);
+    }
+    picked.add(choice);
+    selection.push(choice.value);
+  }
+  return selection;
+}
+
 /** Floor on how long a module's activity indicator stays up, so a fast fetch
  * still registers visually. */
 export const MIN_INDICATOR_MS = 300;
