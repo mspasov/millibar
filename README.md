@@ -13,20 +13,22 @@ press `START` to refresh, with the status light fading cyan while it fetches.
 
 ## What it looks like
 
-Captured from the device's own framebuffer (`tools/screenshot.ts`, upscaled 8×; the
-panel is 72×16).
+Rendered mockups with showcase data, not captures: `tools/readme-shots.ts` runs each
+module's real `render()` on fixture data and rasterizes the elements with the
+firmware's own fonts — the rasterizer reproduces a real `/api/screen` capture
+pixel-for-pixel (its `validate` mode) — then draws the 72×16 frame as an LED panel.
 
 **Claude gauge** — one limit window at a time: label, countdown to the window's reset,
-percentage, and the severity-coloured bar. The faint notch in the track is the pace
-tick — fill past it means tokens are going faster than the window.
+percentage, and the severity-coloured bar. The notch is the pace tick, marking how much
+of the window has elapsed — fill past it means tokens are going faster than time.
 
-![Claude gauge: the 5-hour window at 13%, 3:26 to reset](docs/img/gauge.png)
+![Claude gauge: the 5-hour window at 67%, amber, 2:42 to reset, over pace](docs/img/gauge.png)
 
 **Claude dashboard** — every window at once: one slim bar per window under the detail
 row for the selected one, whose bar runs at full brightness behind the marker at the
 left edge while the other rows dim.
 
-![Claude dashboard: detail row for the 5-hour window above three slim per-window bars](docs/img/dash.png)
+![Claude dashboard: the 5-hour window selected at 67% amber, over a green 7-day bar at 42% and a red FABLE bar at 88%](docs/img/dash.png)
 
 **Claude history** — the last 30 days of token spend, one stacked per-model bar per
 day…
@@ -40,12 +42,12 @@ day…
 **Grok weekly** — the SuperGrok shared credit pool on the same gauge layout, counting
 down to the weekly reset.
 
-![Grok weekly: the shared credit pool at 3%, 4 days 8 hours to reset](docs/img/grok.png)
+![Grok weekly: the shared credit pool at 38%, 4 days 8 hours to reset](docs/img/grok.png)
 
 **CPU load** — load averages normalised by core count: sustained pressure, not
 instantaneous CPU%.
 
-![CPU load: the 1-minute window at 13%](docs/img/cpu.png)
+![CPU load: the 1-minute window at 52%, amber](docs/img/cpu.png)
 
 ## Setup
 
@@ -74,6 +76,7 @@ it hangs or errors, see [Troubleshooting](#troubleshooting).
 | `bun run tools/chime.ts [freqs-hz...]` | Synthesizes a chime, uploads it, and plays it on the speaker. |
 | `bun run tools/click.ts [--once]` | Clicks the speaker whenever the rotary dial moves. |
 | `bun run tools/screenshot.ts [out.png] [front\|back] [scale]` | Captures a display to PNG. |
+| `bun run tools/readme-shots.ts generate\|validate [--fw <path>]` | Regenerates the README's screen mockups — the modules' real `render()` on showcase data, rasterized with the firmware's fonts (a `busybar-firmware` checkout supplies them), no device needed. `validate` diffs the rasterizer against a real capture. |
 | `mbar probe\|routes\|show\|init\|set\|rm\|order` | **Connection config.** Manages the persistent route list (USB / LAN / cloud, with credentials) and probes which route answers. `--route <names>` forces a run onto specific routes. See [Connecting](#connecting-to-the-device). |
 | `bbar` (or `bun run tools/bbar.ts`) | **Storage CLI.** Browse and manage the device's 7 GB `/ext` partition and per-app assets: `ls`/`df`/`cat`/`get`/`put`/`mv`/`mkdir`/`rm`, plus `apps`/`push`/`wipe` for asset directories. `bbar help` for the full list. |
 

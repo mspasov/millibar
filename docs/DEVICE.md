@@ -225,6 +225,23 @@ widths, measured from `/api/screen` readbacks (firmware 1.1.1):
 `src/display.ts` embeds the small-font table (`textWidth()`), used to right-fit the
 monitor's reset countdown between a variable-width label and the percentage.
 
+#### Text fonts (ground truth)
+
+The measurements above are now explained by the firmware source: `api_display.c` maps
+the draw API's font names `tiny`/`small`/`normal`/`condensed`/`bold`/`large`/
+`extra_large`/`global` to LVGL binary fonts under `assets/shared/fonts/` — **`small` =
+`busy_regular_5.font`** (line height 9, baseline 2), **`normal` = `busy_regular_7.font`**
+(line height 11, baseline 2), both 1bpp `lv_binfont` files (parser of record:
+`lv_binfont_loader.c`). Text renders as a stock LVGL label: letter spacing 0 (advances
+already include the 1px gap), glyph top = label top + (line_height − base_line) − box_h
+− ofs_y, advances stored FP4 and rounded with `(adv + 8) >> 4`. An element's `x, y` is
+where the `align`-named anchor of the widget's content box lands (`canvas_widget_reanchor`
+plus LVGL object alignment, integer division on centring) — which is why `mid_right`
+puts the last *inked* column at `x − 2`: the box edge is at `x`, and the final glyph's
+advance carries a trailing blank column. `tools/readme-shots.ts` ports all of this and
+reproduces a real `/api/screen` capture pixel-for-pixel (its `validate` mode proves it),
+so README screenshots can be rendered without the device.
+
 #### Dark-grey legibility
 
 Nearby dark greys do not separate on the panel: a `#262626` fill on the `#202020` bar
