@@ -17,6 +17,7 @@
  */
 import {
   COLORS,
+  DISPLAYS,
   HIDDEN,
   formatResetCompact,
   progressBar,
@@ -38,7 +39,7 @@ import {
   type UsageWindow,
 } from '../usage';
 
-const WIDTH = 72;
+const WIDTH = DISPLAYS.front.width;
 const BAR_Y = 12;
 const BAR_HEIGHT = 3;
 
@@ -187,13 +188,15 @@ export function claudeUsageModule(options: ClaudeUsageOptions): MonitorModule {
         ctx?.log((error as Error).message);
         stale = true;
         retarget();
-        ctx?.pulseActivity(COLORS.critical, FAIL_BLINK);
         if (error instanceof RateLimitError) {
+          // Routine back-off, not a fault — no red blink, or it would recur
+          // every backed-off cycle for as long as the API stays rate-limited.
           // Hold button-triggered refreshes off for the whole back-off, not
           // just the usual cooldown, so a 429 isn't immediately provoked again.
           const waitMs = Math.max(error.retryAfterSeconds * 1000, pollIntervalMs);
           return { nextPollMs: waitMs, holdRefreshMs: waitMs };
         }
+        ctx?.pulseActivity(COLORS.critical, FAIL_BLINK);
         return { nextPollMs: pollIntervalMs, holdRefreshMs: refreshCooldownMs };
       }
     },

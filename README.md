@@ -118,7 +118,9 @@ device actually sustains.
   repaints (without refetching), so a blank screen is always recoverable — every button
   press ends in a repaint.
 - A failed update blinks the status light **red, once** (preempting the cyan fetch
-  fade), and the shown values dim to stale grey until a fetch succeeds.
+  fade), and the shown values dim to stale grey until a fetch succeeds. A rate-limit
+  back-off (429) skips the blink — it's routine, and would otherwise recur every
+  backed-off cycle — but still dims.
 - The last successful usage read is cached in `~/.cache/mbar/usage.json`, so a restart
   while the API is unreachable or rate-limited starts from the previous values — grey
   with a `?` on the label, like any stale data — until a live fetch replaces them.

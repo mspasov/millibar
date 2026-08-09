@@ -10,11 +10,16 @@
  * callers that simply stop drawing an element.
  */
 import type { DisplayDrawParams } from '@busy-app/busy-lib';
+import { httpBase } from './config';
 
 export type DrawElement = DisplayDrawParams['elements'][number];
 
-const ADDR = process.env.BUSY_BAR_ADDR ?? '10.0.4.20';
-const BASE_URL = ADDR.startsWith('http') ? ADDR : `http://${ADDR}`;
+/** Panel geometry and `/api/screen` capture indices. The front bar is the
+ * canvas every monitor layout is sized against. */
+export const DISPLAYS = {
+  front: { index: 0, width: 72, height: 16 },
+  back: { index: 1, width: 160, height: 80 },
+} as const;
 
 /**
  * Posts a draw directly instead of via `bar.DisplayDraw`.
@@ -26,7 +31,7 @@ const BASE_URL = ADDR.startsWith('http') ? ADDR : `http://${ADDR}`;
  * identical, so this just sends the body as written.
  */
 export async function displayDraw(body: DisplayDrawParams): Promise<void> {
-  const response = await fetch(`${BASE_URL}/api/display/draw`, {
+  const response = await fetch(`${httpBase()}/api/display/draw`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -41,7 +46,7 @@ export async function displayDraw(body: DisplayDrawParams): Promise<void> {
  * blank until someone draws again — nothing reverts on its own. */
 export async function displayClear(applicationName: string): Promise<void> {
   const response = await fetch(
-    `${BASE_URL}/api/display/draw?application_name=${encodeURIComponent(applicationName)}`,
+    `${httpBase()}/api/display/draw?application_name=${encodeURIComponent(applicationName)}`,
     { method: 'DELETE', signal: AbortSignal.timeout(5000) }
   );
   if (!response.ok) {

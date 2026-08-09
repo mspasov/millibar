@@ -24,6 +24,8 @@
  *   bun run src/led.ts fade  [#A,#B,...] [ms] [rgb|hsv]
  */
 
+import { httpBase } from './config';
+
 type Rgb = [number, number, number];
 
 export type ColorSpace = 'rgb' | 'hsv';
@@ -44,6 +46,10 @@ export interface PulseOptions extends TransportOptions {
   cycles?: number;
   framesPerSecond?: number;
 }
+
+/** The subset of PulseOptions a caller may override per pulse — named once so
+ * module.ts and host.ts don't each hand-write the same literal. */
+export type PulseShape = Pick<PulseOptions, 'durationMs' | 'cycles'>;
 
 export interface FadeOptions extends TransportOptions {
   /** Two or more stops to travel through, in order. */
@@ -173,12 +179,16 @@ const FILLER_ELEMENT = {
 };
 
 function createSender(options: TransportOptions) {
-  const addr = options.addr ?? process.env.BUSY_BAR_ADDR ?? '10.0.4.20';
-  const baseUrl = addr.startsWith('http') ? addr : `http://${addr}`;
+  const baseUrl = httpBase(options.addr);
   const applicationName = options.applicationName ?? 'claude_usage';
   const priority = options.priority ?? 50;
 
-  return async function send(ledColor: string): Promise<void> {
+  /** `signal` cancels an in-flight frame at once — without it an abort is only
+   * observed at the next frame boundary, which on a degraded network delays
+   * the pulse that preempted this one by up to the 2s frame timeout. The final
+   * cleanup frame passes no signal: an aborted pulse must still turn the
+   * light off. */
+  return async function send(ledColor: string, signal?: AbortSignal): Promise<void> {
     try {
       await fetch(`${baseUrl}/api/display/draw`, {
         method: 'POST',
@@ -189,7 +199,9 @@ function createSender(options: TransportOptions) {
           led_notification_color: ledColor,
           elements: [FILLER_ELEMENT],
         }),
-        signal: AbortSignal.timeout(2000),
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(2000)])
+          : AbortSignal.timeout(2000),
       });
     } catch {
       // A dropped frame just makes the animation slightly coarser; never let it
@@ -198,20 +210,22 @@ function createSender(options: TransportOptions) {
   };
 }
 
-/** Run `frameCount` frames at a fixed cadence, compensating for request time. */
+/** Run `frameCount` frames at a fixed cadence, compensating for request time.
+ * Returns how many frames actually ran before completion or abort. */
 async function animate(
   frameCount: number,
   frameMs: number,
   signal: AbortSignal | undefined,
   onFrame: (index: number) => Promise<void>
-): Promise<void> {
+): Promise<number> {
   for (let i = 0; i < frameCount; i++) {
-    if (signal?.aborted) return;
+    if (signal?.aborted) return i;
     const startedAt = Date.now();
     await onFrame(i);
     const remaining = frameMs - (Date.now() - startedAt);
     if (remaining > 0) await Bun.sleep(remaining);
   }
+  return frameCount;
 }
 
 /**
@@ -224,15 +238,18 @@ export async function pulseLed(options: PulseOptions = {}): Promise<void> {
   const rgb = parseRgb(color);
   const frameCount = Math.max(2, Math.round((durationMs / 1000) * framesPerSecond));
 
-  await animate(frameCount, durationMs / frameCount, options.signal, async (i) => {
+  const ran = await animate(frameCount, durationMs / frameCount, options.signal, async (i) => {
     const phase = (i / frameCount) * cycles * 2 * Math.PI;
     // Raised cosine: starts and ends at zero, peaks mid-cycle.
-    await send(toHex(rgb, (1 - Math.cos(phase)) / 2));
+    await send(toHex(rgb, (1 - Math.cos(phase)) / 2), options.signal);
   });
 
   // Without this the notification preset keeps blinking the last colour for the
   // remainder of its ~3s run. A black colour blinks black-on-black, i.e. off.
-  await send('#000000FF');
+  // A pulse aborted before its first frame lit nothing and sends nothing: its
+  // late cleanup draw would land after the host's shutdown display clear and
+  // re-register the application on the device.
+  if (ran > 0) await send('#000000FF');
 }
 
 /**
@@ -264,26 +281,28 @@ export async function fadeLed(options: FadeOptions): Promise<void> {
   const frameCount = Math.max(2, Math.round((durationMs / 1000) * framesPerSecond));
   const segments = stops.length - 1;
   let last: Rgb = stops[0]!;
+  let ran = 0;
 
   for (let pass = 0; pass < loop; pass++) {
-    await animate(frameCount, frameMs, options.signal, async (i) => {
+    ran += await animate(frameCount, frameMs, options.signal, async (i) => {
       // Position along the whole stop list, then which segment that lands in.
       const position = (i / (frameCount - 1)) * segments;
       const index = Math.min(Math.floor(position), segments - 1);
       last = mix(stops[index]!, stops[index + 1]!, position - index, space);
-      await send(toHex(last, 1));
+      await send(toHex(last, 1), options.signal);
     });
     if (options.signal?.aborted) break;
   }
 
   if (fadeOutMs > 0 && !options.signal?.aborted) {
     const outFrames = Math.max(2, Math.round((fadeOutMs / 1000) * framesPerSecond));
-    await animate(outFrames, frameMs, options.signal, async (i) => {
-      await send(toHex(last, 1 - (i + 1) / outFrames));
+    ran += await animate(outFrames, frameMs, options.signal, async (i) => {
+      await send(toHex(last, 1 - (i + 1) / outFrames), options.signal);
     });
   }
 
-  await send('#000000FF');
+  // Same rule as pulseLed: nothing lit means nothing to put out.
+  if (ran > 0) await send('#000000FF');
 }
 
 if (import.meta.main) {

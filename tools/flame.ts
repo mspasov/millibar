@@ -25,11 +25,13 @@
  */
 import { BusyBar } from '@busy-app/busy-lib';
 import { encodeAnim, type AnimSection } from '../src/anim';
+import { deviceAddr, envNumber, httpBase } from '../src/config';
+import { DISPLAYS } from '../src/display';
 import { listenInput } from '../src/input';
 import { encodePng } from '../src/png';
 
-const WIDTH = 72;
-const HEIGHT = 16;
+const WIDTH = DISPLAYS.front.width;
+const HEIGHT = DISPLAYS.front.height;
 const FPS = 20;
 const LEVELS = 16;
 const MAX_LEVEL = LEVELS - 1;
@@ -51,9 +53,9 @@ const PHASE_LEAD = 3;
 
 const APP_NAME = 'claude_flame';
 const FILE_NAME = 'flame.anim';
-const PRIORITY = Number(process.env.BUSY_PRIORITY ?? 50);
-const ADDR = process.env.BUSY_BAR_ADDR ?? '10.0.4.20';
-const BASE_URL = ADDR.startsWith('http') ? ADDR : `http://${ADDR}`;
+const PRIORITY = envNumber('BUSY_PRIORITY', 50, 1);
+const ADDR = deviceAddr();
+const BASE_URL = httpBase();
 
 /** Redraws refresh this; the display self-clears if the process dies. */
 const DRAW_TIMEOUT_S = 90;

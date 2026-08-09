@@ -14,12 +14,15 @@
  * Env:   BUSY_BAR_ADDR, BUSY_PRIORITY, POLL_INTERVAL_MS, REFRESH_COOLDOWN_MS,
  *        SWITCH_BUTTON (which button the dial press reports as; default OK)
  */
+import { envNumber } from './config';
 import { runHost } from './host';
 import { claudeUsageModule } from './modules/claude-usage';
 import { cpuModule } from './modules/cpu';
 
-const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? 5 * 60 * 1000);
-const REFRESH_COOLDOWN_MS = Number(process.env.REFRESH_COOLDOWN_MS ?? 5000);
+// Validated, not just Number()-coerced: a NaN interval would make every
+// setTimeout fire immediately and hot-loop the rate-limited usage API.
+const POLL_INTERVAL_MS = envNumber('POLL_INTERVAL_MS', 5 * 60 * 1000, 1000);
+const REFRESH_COOLDOWN_MS = envNumber('REFRESH_COOLDOWN_MS', 5000, 0);
 
 await runHost([
   claudeUsageModule({ pollIntervalMs: POLL_INTERVAL_MS, refreshCooldownMs: REFRESH_COOLDOWN_MS }),

@@ -6,9 +6,11 @@
  */
 import { BusyBar } from '@busy-app/busy-lib';
 import { encodeAnim } from '../src/anim';
+import { deviceAddr } from '../src/config';
+import { DISPLAYS } from '../src/display';
 
-const WIDTH = 72;
-const HEIGHT = 16;
+const WIDTH = DISPLAYS.front.width;
+const HEIGHT = DISPLAYS.front.height;
 const FPS = 30;
 const FRAME_COUNT = 90; // 3s perfect loop
 const APP_NAME = 'claude_anim';
@@ -59,7 +61,7 @@ function generateFrames(): Uint8Array[] {
   return frames;
 }
 
-const bar = new BusyBar({ addr: process.env.BUSY_BAR_ADDR ?? '10.0.4.20' });
+const bar = new BusyBar({ addr: deviceAddr() });
 
 console.log(`Generating ${FRAME_COUNT} frames of ${WIDTH}x${HEIGHT} plasma...`);
 const anim = encodeAnim(generateFrames(), { width: WIDTH, height: HEIGHT, fps: FPS });

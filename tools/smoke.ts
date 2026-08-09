@@ -1,6 +1,7 @@
 import { BusyBar } from '@busy-app/busy-lib';
+import { deviceAddr } from '../src/config';
 
-const bar = new BusyBar({ addr: process.env.BUSY_BAR_ADDR ?? '10.0.4.20' });
+const bar = new BusyBar({ addr: deviceAddr() });
 
 const { device, firmware, power, system } = await bar.SystemStatusGet();
 console.log(

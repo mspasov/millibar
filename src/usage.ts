@@ -10,7 +10,7 @@
  * The access token stays in memory: never logged, never written to disk, never
  * passed as an argv where `ps` could read it.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, renameSync, rmSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
 import { join } from 'node:path';
 
@@ -113,7 +113,7 @@ function discoverServiceNames(): string[] {
 function readCredentialsFile(): Credentials | null {
   const dir = process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude');
   try {
-    return parseCredentials(require('node:fs').readFileSync(join(dir, '.credentials.json'), 'utf8'));
+    return parseCredentials(readFileSync(join(dir, '.credentials.json'), 'utf8'));
   } catch {
     return null;
   }
@@ -160,9 +160,17 @@ interface ApiLimit {
   scope?: { model?: { display_name?: string | null } | null } | null;
 }
 
+/** A window only counts if it would render: utilization must be a finite
+ * number. One sanitizer for both the live fetch and the cache read, so the
+ * two paths cannot drift — API shape drift and a hand-edited cache file both
+ * drop the window instead of putting `NaN%` on the display. */
+function windowFrom(utilization: unknown, resetsAt: unknown): UsageWindow | null {
+  if (typeof utilization !== 'number' || !Number.isFinite(utilization)) return null;
+  return { utilization, resetsAt: typeof resetsAt === 'string' ? resetsAt : null };
+}
+
 function toWindow(w: ApiWindow | null | undefined): UsageWindow | null {
-  if (!w) return null;
-  return { utilization: w.utilization, resetsAt: w.resets_at ?? null };
+  return w ? windowFrom(w.utilization, w.resets_at) : null;
 }
 
 /**
@@ -175,13 +183,12 @@ function toWindow(w: ApiWindow | null | undefined): UsageWindow | null {
  */
 function collectModelWindows(limits: ApiLimit[]): ModelWindow[] {
   const windows = limits
-    .map((l) => ({ model: l.scope?.model?.display_name?.trim(), limit: l }))
-    .filter((e): e is { model: string; limit: ApiLimit } => Boolean(e.model))
-    .map(({ model, limit }) => ({
-      model,
-      utilization: limit.percent ?? 0,
-      resetsAt: limit.resets_at ?? null,
+    .map((l) => ({
+      model: l.scope?.model?.display_name?.trim(),
+      window: windowFrom(l.percent ?? 0, l.resets_at),
     }))
+    .filter((e): e is { model: string; window: UsageWindow } => Boolean(e.model && e.window))
+    .map(({ model, window }) => ({ model, ...window }))
     .sort((a, b) => a.model.localeCompare(b.model));
 
   return windows.filter((w, i) => i === 0 || w.model !== windows[i - 1]!.model);
@@ -253,17 +260,15 @@ export let lastRawBody: unknown = null;
 
 export const USAGE_CACHE_PATH = join(homedir(), '.cache', 'mbar', 'usage.json');
 
-/** A window only counts if it would render: utilization must be a number.
- * Guards against hand-edited or truncated cache files reaching the display
- * as `NaN%`. */
 function cachedWindow(raw: unknown): UsageWindow | null {
   if (!raw || typeof raw !== 'object') return null;
   const { utilization, resetsAt } = raw as Record<string, unknown>;
-  if (typeof utilization !== 'number' || !Number.isFinite(utilization)) return null;
-  return { utilization, resetsAt: typeof resetsAt === 'string' ? resetsAt : null };
+  return windowFrom(utilization, resetsAt);
 }
 
-/** Null when absent or corrupt — a bad cache is simply no cache. */
+/** Null when absent, corrupt, or empty — a cache with nothing renderable is
+ * simply no cache (seeding from it would announce cached usage over a blank
+ * screen). */
 export function loadCachedUsage(path = USAGE_CACHE_PATH): Usage | null {
   let raw: any;
   try {
@@ -271,8 +276,11 @@ export function loadCachedUsage(path = USAGE_CACHE_PATH): Usage | null {
   } catch {
     return null;
   }
-  // Our own writes always carry an ISO fetchedAt; anything else is not ours.
-  const fetchedAt = new Date(raw?.fetchedAt);
+  // Our own writes always carry an ISO fetchedAt string; anything else is not
+  // ours. Checked as a string — new Date() alone would happily coerce
+  // numbers, booleans, and arrays.
+  if (typeof raw?.fetchedAt !== 'string') return null;
+  const fetchedAt = new Date(raw.fetchedAt);
   if (!Number.isFinite(fetchedAt.getTime())) return null;
   const models: ModelWindow[] = Array.isArray(raw?.models)
     ? raw.models.flatMap((m: unknown) => {
@@ -281,16 +289,28 @@ export function loadCachedUsage(path = USAGE_CACHE_PATH): Usage | null {
         return window && typeof model === 'string' ? [{ ...window, model }] : [];
       })
     : [];
-  return { fiveHour: cachedWindow(raw?.fiveHour), sevenDay: cachedWindow(raw?.sevenDay), models, fetchedAt };
+  const fiveHour = cachedWindow(raw?.fiveHour);
+  const sevenDay = cachedWindow(raw?.sevenDay);
+  if (!fiveHour && !sevenDay && models.length === 0) return null;
+  return { fiveHour, sevenDay, models, fetchedAt };
 }
 
 /** Best-effort: a read-only or full disk must not break polling. Bun.write
- * creates the ~/.cache/mbar/ directory itself. */
+ * creates the ~/.cache/mbar/ directory itself. Written to a temp file and
+ * renamed so a crash mid-write cannot tear the previous good cache — a torn
+ * file reads as "no cache", a blank screen in exactly the outage the cache
+ * exists for. */
 export async function saveCachedUsage(usage: Usage, path = USAGE_CACHE_PATH): Promise<void> {
+  const tmp = `${path}.tmp`;
   try {
-    await Bun.write(path, JSON.stringify(usage));
+    await Bun.write(tmp, JSON.stringify(usage));
+    renameSync(tmp, path);
   } catch {
-    // deliberately silent
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      // deliberately silent — same rule as the write itself
+    }
   }
 }
 

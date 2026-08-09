@@ -15,6 +15,7 @@
  *        bun run tools/click.ts --once   # play a single click and exit
  */
 import { BusyBar } from '@busy-app/busy-lib';
+import { deviceAddr } from '../src/config';
 import { listenInput } from '../src/input';
 import { SAMPLE_RATE, pcm16 } from '../src/snd';
 
@@ -38,7 +39,7 @@ function synthesizeClick(): Int16Array {
   return pcm16(samples);
 }
 
-const bar = new BusyBar({ addr: process.env.BUSY_BAR_ADDR ?? '10.0.4.20' });
+const bar = new BusyBar({ addr: deviceAddr() });
 
 const pcm = synthesizeClick();
 await bar.AssetsUpload(

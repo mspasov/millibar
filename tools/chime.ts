@@ -10,6 +10,7 @@
  *   e.g. bun run tools/chime.ts 523.25 659.25 783.99
  */
 import { BusyBar } from '@busy-app/busy-lib';
+import { deviceAddr } from '../src/config';
 import { SAMPLE_RATE, pcm16 } from '../src/snd';
 
 const APP_NAME = 'claude_sound';
@@ -46,7 +47,7 @@ function synthesizeChime(frequencies: number[]): Float64Array {
   return samples;
 }
 
-const bar = new BusyBar({ addr: process.env.BUSY_BAR_ADDR ?? '10.0.4.20' });
+const bar = new BusyBar({ addr: deviceAddr() });
 
 const pcm = pcm16(synthesizeChime(freqs));
 console.log(

@@ -17,6 +17,8 @@
  * Usage: bun run src/input.ts
  */
 
+import { deviceAddr, wsBase } from './config';
+
 const BUTTONS = ['OK', 'BACK', 'START'] as const;
 const ACTIONS = ['PRESS', 'RELEASE'] as const;
 const SWITCH_POSITIONS = ['BUSY', 'CUSTOM', 'OFF', 'APPS', 'SETTINGS'] as const;
@@ -159,12 +161,14 @@ export async function listenInput(
   onEvent: (event: InputEvent) => void,
   options: ListenOptions = {}
 ): Promise<void> {
-  const addr = options.addr ?? process.env.BUSY_BAR_ADDR ?? '10.0.4.20';
+  // wsBase: BUSY_BAR_ADDR may be a full http(s) URL, which must map to
+  // ws(s)://, not be glued after "ws://".
+  const base = wsBase(options.addr);
   const { signal, onError } = options;
 
   while (!signal?.aborted) {
     await new Promise<void>((resolve) => {
-      const ws = new WebSocket(`ws://${addr}/api/status/ws`);
+      const ws = new WebSocket(`${base}/api/status/ws`);
       ws.binaryType = 'arraybuffer';
       const close = () => ws.close();
       signal?.addEventListener('abort', close, { once: true });
@@ -181,7 +185,7 @@ export async function listenInput(
           onEvent(input);
         }
       };
-      ws.onerror = () => onError?.(new Error(`state stream connection to ${addr} failed`));
+      ws.onerror = () => onError?.(new Error(`state stream connection to ${base} failed`));
       ws.onclose = finish;
     });
 
@@ -206,7 +210,7 @@ if (import.meta.main) {
   });
 
   console.log(
-    `Listening for input on ${process.env.BUSY_BAR_ADDR ?? '10.0.4.20'} — ` +
+    `Listening for input on ${deviceAddr()} — ` +
       'press buttons, turn the dial, or move the switch (Ctrl-C to stop)'
   );
   await listenInput(

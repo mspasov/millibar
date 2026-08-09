@@ -14,11 +14,11 @@
  * silently instead of flashing the bar's leading edge every poll.
  */
 import os from 'node:os';
-import { COLORS, progressBar, severityColor, type DrawElement } from '../display';
+import { COLORS, DISPLAYS, progressBar, severityColor, type DrawElement } from '../display';
 import { wrapIndex, type ModuleContext, type MonitorModule, type PollResult } from '../module';
 import { PctSweep, sweepHead } from '../sweep';
 
-const WIDTH = 72;
+const WIDTH = DISPLAYS.front.width;
 const BAR_Y = 12;
 const BAR_HEIGHT = 3;
 const LABEL_X = 2;

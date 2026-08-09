@@ -9,20 +9,17 @@
  * unnoticed (greens and greys are unaffected). The official library does the
  * same swap in Global/utils/frameData.ts:bgrToRgba.
  */
+import { httpBase } from '../src/config';
+import { DISPLAYS } from '../src/display';
 import { encodePng } from '../src/png';
-
-const DISPLAYS = {
-  front: { index: 0, width: 72, height: 16 },
-  back: { index: 1, width: 160, height: 80 },
-} as const;
 
 const [outPath = 'screen.png', displayName = 'front', scaleArg] = process.argv.slice(2);
 const display = DISPLAYS[displayName as keyof typeof DISPLAYS];
 if (!display) throw new Error(`display must be one of: ${Object.keys(DISPLAYS).join(', ')}`);
 const scale = Number(scaleArg ?? 10);
+if (!Number.isInteger(scale) || scale < 1) throw new Error(`scale must be a positive integer, got '${scaleArg}'`);
 
-const addr = process.env.BUSY_BAR_ADDR ?? '10.0.4.20';
-const response = await fetch(`http://${addr}/api/screen?display=${display.index}`, {
+const response = await fetch(`${httpBase()}/api/screen?display=${display.index}`, {
   signal: AbortSignal.timeout(10_000),
 });
 if (!response.ok) throw new Error(`screen capture failed: HTTP ${response.status}`);

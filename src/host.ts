@@ -8,13 +8,14 @@
  * and every button press ends in a repaint so a screen blanked by BACK (or
  * overdrawn by another app) is always recoverable.
  */
+import { deviceAddr, envNumber } from './config';
 import { DisplaySession } from './display';
 import { listenInput, type Button, type InputEvent } from './input';
-import { pulseLed } from './led';
+import { pulseLed, type PulseShape } from './led';
 import { ModuleRunner, wrapIndex, type MonitorModule } from './module';
 
 const BUTTONS: readonly Button[] = ['OK', 'BACK', 'START'];
-const ADDR = process.env.BUSY_BAR_ADDR ?? '10.0.4.20';
+const ADDR = deviceAddr();
 
 export interface HostOptions {
   /** Kept as the historical 'claude_usage' by default: the device rejects
@@ -43,7 +44,7 @@ function envSwitchButton(): Button | undefined {
 export async function runHost(modules: MonitorModule[], options: HostOptions = {}): Promise<void> {
   if (modules.length === 0) throw new Error('runHost needs at least one module');
   const applicationName = options.applicationName ?? 'claude_usage';
-  const priority = options.priority ?? Number(process.env.BUSY_PRIORITY ?? 50);
+  const priority = options.priority ?? envNumber('BUSY_PRIORITY', 50, 1);
   const heartbeatMs = options.heartbeatMs ?? 60_000;
   const switchButton = options.switchButton ?? envSwitchButton() ?? 'OK';
 
@@ -83,15 +84,23 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
    * cleanup, so the old run's final black frame cannot land mid-blink. */
   let ledAbort: AbortController | null = null;
   let ledChain = Promise.resolve();
-  function pulseStatusLight(color: string, shape?: { durationMs?: number; cycles?: number }): void {
+  function pulseStatusLight(color: string, shape?: PulseShape, stillWanted: () => boolean = () => true): void {
     ledAbort?.abort();
     const abort = new AbortController();
     ledAbort = abort;
     const signal = AbortSignal.any([abort.signal, controller.signal]);
     // Fire-and-forget: the fade outlasts a typical fetch and must not delay it.
+    // `stillWanted` re-runs when the chain drains — a module switched away
+    // while the previous pulse wound down must not start its pulse late.
     ledChain = ledChain
-      .then(() => pulseLed({ color, ...shape, applicationName, priority, signal }))
-      .catch(() => {});
+      .then(() => {
+        if (signal.aborted || !stillWanted()) return;
+        return pulseLed({ color, ...shape, applicationName, priority, signal });
+      })
+      // Load-bearing: an uncaught rejection would skip every later pulse. Log
+      // instead of swallowing — the light is otherwise unobservable, so this
+      // is the only trace of a pulse that never ran (e.g. a bad colour).
+      .catch((e) => console.error(`status light: ${(e as Error).message}`));
   }
 
   modules.forEach((module, index) => {
@@ -100,7 +109,7 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
         if (activeIndex === index) repaint();
       },
       pulseActivity: (color, shape) => {
-        if (activeIndex === index) pulseStatusLight(color, shape);
+        if (activeIndex === index) pulseStatusLight(color, shape, () => activeIndex === index);
       },
       log: (message) => console.log(`[${module.id}] ${message}`),
       signal: controller.signal,
@@ -140,8 +149,11 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.on(signal, () => {
       controller.abort();
-      void session
-        .clear()
+      // Drain the LED chain first: an aborted pulse still sends its light-off
+      // frame, and that draw must land before the clear — after it, it would
+      // re-register the application on the device.
+      void ledChain
+        .then(() => session.clear())
         .catch(() => {})
         .finally(() => process.exit(0));
     });
@@ -163,9 +175,11 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
     ]);
   } catch (error) {
     // A module poll() throw is fatal by contract (e.g. NoCredentialsError):
-    // stop everything, leave the display clean, and exit non-zero.
+    // stop everything, leave the display clean, and exit non-zero. As on
+    // SIGINT, the LED chain drains before the clear.
     controller.abort();
     console.error((error as Error).message);
+    await ledChain.catch(() => {});
     await session.clear().catch(() => {});
     process.exitCode = 1;
   }

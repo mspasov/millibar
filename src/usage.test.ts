@@ -1,18 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tempDirs } from './test-util';
 import { loadCachedUsage, saveCachedUsage, type Usage } from './usage';
 
-const dirs: string[] = [];
-function tempDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'mbar-usage-'));
-  dirs.push(dir);
-  return dir;
-}
-afterEach(() => {
-  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
-});
+const { tempDir, cleanup } = tempDirs('mbar-usage-');
+afterEach(cleanup);
 
 const usage: Usage = {
   fiveHour: { utilization: 62, resetsAt: '2026-08-07T12:00:00.000Z' },
@@ -39,6 +32,23 @@ describe('usage cache', () => {
     expect(loadCachedUsage(join(dir, 'corrupt.json'))).toBeNull();
     writeFileSync(join(dir, 'stampless.json'), JSON.stringify({ ...usage, fetchedAt: 'not a date' }));
     expect(loadCachedUsage(join(dir, 'stampless.json'))).toBeNull();
+  });
+
+  test('a non-string fetchedAt is not ours, even when Date would coerce it', () => {
+    // {"fetchedAt": 0} would otherwise log "showing cached usage from 1970".
+    const dir = tempDir();
+    for (const fetchedAt of [0, null, true, ['2026-01-01']]) {
+      const path = join(dir, 'foreign.json');
+      writeFileSync(path, JSON.stringify({ ...usage, fetchedAt }));
+      expect(loadCachedUsage(path)).toBeNull();
+    }
+  });
+
+  test('a cache with nothing renderable is no cache', () => {
+    // Seeding from it would announce cached usage over a blank screen.
+    const path = join(tempDir(), 'empty.json');
+    writeFileSync(path, JSON.stringify({ fetchedAt: usage.fetchedAt.toISOString() }));
+    expect(loadCachedUsage(path)).toBeNull();
   });
 
   test('windows with a non-numeric utilization are dropped, not rendered as NaN%', () => {

@@ -1,9 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { COLORS, HIDDEN } from '../display';
 import type { ModuleContext } from '../module';
+import { tempDirs } from '../test-util';
 import { loadCachedUsage, NoCredentialsError, RateLimitError, saveCachedUsage, type Usage } from '../usage';
 import { buildViews, claudeUsageModule, type ClaudeUsageOptions } from './claude-usage';
 
@@ -22,15 +21,8 @@ const nullContext = (): ModuleContext => ({
   signal: new AbortController().signal,
 });
 
-const cacheDirs: string[] = [];
-function cacheDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'mbar-module-'));
-  cacheDirs.push(dir);
-  return dir;
-}
-afterEach(() => {
-  for (const dir of cacheDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
-});
+const { tempDir: cacheDir, cleanup } = tempDirs('mbar-module-');
+afterEach(cleanup);
 
 function makeModule(fetchImpl: () => Promise<Usage>, over: Partial<ClaudeUsageOptions> = {}) {
   const module = claudeUsageModule({
@@ -128,6 +120,23 @@ describe('poll', () => {
     await module.poll();
     expect(pulses[1]).toEqual({ color: COLORS.refresh, shape: undefined });
     expect(pulses[2]).toEqual({ color: COLORS.critical, shape: { durationMs: 600, cycles: 1 } });
+  });
+
+  test('a 429 back-off does not blink red — it is routine, not a fault', async () => {
+    const pulses: string[] = [];
+    const module = claudeUsageModule({
+      pollIntervalMs: 300_000,
+      refreshCooldownMs: 5_000,
+      sweepMs: 0,
+      sweepCoolMs: 0,
+      cachePath: null,
+      fetchUsageImpl: async () => {
+        throw new RateLimitError(900);
+      },
+    });
+    module.init?.({ ...nullContext(), pulseActivity: (color) => pulses.push(color) });
+    await module.poll();
+    expect(pulses).toEqual([COLORS.refresh]); // the fetch pulse only
   });
 
   test('missing credentials are fatal', async () => {

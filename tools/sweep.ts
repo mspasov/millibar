@@ -23,8 +23,10 @@
  * with BUSY_PRIORITY=51 to draw over it. Exiting clears this app's elements;
  * mbar will not repaint on its own until a button press or its next heartbeat.
  */
+import { deviceAddr, envNumber } from '../src/config';
 import {
   COLORS,
+  DISPLAYS,
   DisplaySession,
   HIDDEN,
   mixRgb,
@@ -33,7 +35,7 @@ import {
   type DrawElement,
 } from '../src/display';
 
-const WIDTH = 72;
+const WIDTH = DISPLAYS.front.width;
 const BAR_Y = 12;
 const BAR_HEIGHT = 3;
 const LABEL_X = 2;
@@ -52,8 +54,8 @@ const PAUSE_MS = 700;
 
 const WHITE = '#FFFFFFFF';
 const APP_NAME = 'sweep_test';
-const PRIORITY = Number(process.env.BUSY_PRIORITY ?? 50);
-const ADDR = process.env.BUSY_BAR_ADDR ?? '10.0.4.20';
+const PRIORITY = envNumber('BUSY_PRIORITY', 50, 1);
+const ADDR = deviceAddr();
 /** Refreshed by every draw; the screen self-clears if the process dies. */
 const DRAW_TIMEOUT_S = 60;
 const KEEPALIVE_MS = 20_000;

@@ -4,6 +4,10 @@
     "mbar": "./src/mbar.ts",
     "bbar": "./tools/bbar.ts"
   },
+  "scripts": {
+    "test": "bun test",
+    "check": "bunx tsc --noEmit"
+  },
   "type": "module",
   "private": true,
   "devDependencies": {

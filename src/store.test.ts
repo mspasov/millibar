@@ -10,8 +10,10 @@ import {
   rename,
   requiresForce,
   stat,
+  storageStatus,
   write,
 } from './store';
+import { restoreFetch, stubFetch } from './test-util';
 
 describe('normalizePath', () => {
   test('resolves relative and absolute forms to the same device path', () => {
@@ -72,30 +74,7 @@ describe('humanSize', () => {
 // The DisplayDraw incident (see CLAUDE.md) is why these assert on the actual
 // request rather than trusting the wrappers' signatures.
 
-interface Captured {
-  url: URL;
-  method: string;
-  body?: Uint8Array;
-}
-
-const realFetch = globalThis.fetch;
-afterEach(() => {
-  globalThis.fetch = realFetch;
-});
-
-function stubFetch(respond: (captured: Captured) => Response): Captured[] {
-  const calls: Captured[] = [];
-  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-    const captured: Captured = {
-      url: new URL(String(input)),
-      method: init?.method ?? 'GET',
-      body: init?.body instanceof Uint8Array ? init.body : undefined,
-    };
-    calls.push(captured);
-    return respond(captured);
-  }) as typeof fetch;
-  return calls;
-}
+afterEach(restoreFetch);
 
 const ok = (json: unknown) => new Response(JSON.stringify(json), { status: 200 });
 
@@ -155,6 +134,30 @@ describe('stat', () => {
     const calls = stubFetch(() => ok({}));
     expect((await stat('/ext'))?.type).toBe('dir');
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe('full-URL BUSY_BAR_ADDR', () => {
+  test('a scheme-carrying addr reaches the server instead of becoming http://http://…', async () => {
+    // Real fetch against a local echo server — the regression this guards
+    // broke every bbar command whenever BUSY_BAR_ADDR was a full URL.
+    const status = { used_bytes: 1024, free_bytes: 2048, total_bytes: 3072 };
+    const server = Bun.serve({
+      port: 0,
+      fetch: (req) =>
+        new URL(req.url).pathname === '/api/storage/status'
+          ? Response.json(status)
+          : new Response('wrong path', { status: 404 }),
+    });
+    const previous = process.env.BUSY_BAR_ADDR;
+    process.env.BUSY_BAR_ADDR = `http://127.0.0.1:${server.port}/`;
+    try {
+      expect(await storageStatus()).toEqual(status);
+    } finally {
+      if (previous === undefined) delete process.env.BUSY_BAR_ADDR;
+      else process.env.BUSY_BAR_ADDR = previous;
+      server.stop(true);
+    }
   });
 });
 

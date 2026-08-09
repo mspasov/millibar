@@ -13,6 +13,7 @@
  * factory like src/modules/claude-usage.ts — nothing here changes.
  */
 import type { DrawElement } from './display';
+import type { PulseShape } from './led';
 
 export interface PollResult {
   /** Delay until the next automatic poll. A 429's Retry-After lands here. */
@@ -37,7 +38,7 @@ export interface ModuleContext {
    * still running. Suppressed by the host while the module is hidden: the
    * firmware restarts the notification preset on every draw that carries a
    * colour, so exactly one module may drive it at a time. */
-  pulseActivity(color: string, shape?: { durationMs?: number; cycles?: number }): void;
+  pulseActivity(color: string, shape?: PulseShape): void;
   /** Log a line, prefixed with the module id. */
   log(message: string): void;
   /** Host lifetime — aborted on shutdown. */
