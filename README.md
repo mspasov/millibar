@@ -7,7 +7,7 @@ pixel display, a rotary encoder, three buttons, a five-position mode switch, and
 status light — from TypeScript.
 
 The headline app is a **modular monitor**: press the dial to switch between monitor
-modules — Claude Code usage limits, CPU load, and whatever you add next — rotate it to
+modules — Claude Code usage limits, token history, CPU load, and whatever you add next — rotate it to
 cycle the views inside a module, and press `START` to refresh, with the status light
 fading cyan while it fetches.
 
@@ -27,7 +27,7 @@ it hangs or errors, see [Troubleshooting](#troubleshooting).
 | Command | What it does |
 |---|---|
 | `bun run tools/smoke.ts` | Smoke test — prints device status and busy-timer state. |
-| `mbar` (or `bun run src/mbar.ts`) | **The monitor.** Switchable modules on the display: Claude Code limits and CPU load. Dial press switches modules, rotation cycles views, `START` refreshes. |
+| `mbar` (or `bun run src/mbar.ts`) | **The monitor.** Switchable modules on the display: Claude Code limits, token history (last 30/7 days, stacked by model), and CPU load. Dial press switches modules, rotation cycles views, `START` refreshes. |
 | `bun run src/input.ts` | Prints button, switch, and encoder events live. |
 | `bun run src/led.ts pulse "#00CCFF" 1400 2` | Pulses the status light — colour, duration ms, cycles. |
 | `bun run src/led.ts fade "#F00,#0F0,#00F" 3000 hsv` | Crossfades through colour stops — stops, duration ms, `rgb`\|`hsv`. |
@@ -59,6 +59,10 @@ Each is usable on its own, not just by the monitor.
 - **`src/usage.ts`** — reads Claude Code's own usage limits (5-hour, 7-day, per-model)
   from an undocumented endpoint, using the OAuth token Claude Code already stores. See
   [USAGE-API.md](docs/USAGE-API.md).
+- **`src/stats.ts`** — reads Claude Code's local stats cache, the per-day token history
+  behind its own usage graphs (there is no server endpoint for history). Drawn by the
+  monitor's history module as stacked per-model bars over the last 30 or 7 days. See
+  [USAGE-GRAPH.md](docs/USAGE-GRAPH.md).
 - **`src/input.ts`** — `listenInput()` streams button, switch, and encoder events off the
   device's protobuf WebSocket. Decodes only the input field, so it needs no protobuf
   runtime.
@@ -107,12 +111,14 @@ device actually sustains.
 
 - **Press the dial** (its press arrives as the `OK` button event — override with
   `SWITCH_BUTTON` if your press reports differently) to switch to the next module:
-  Claude usage → CPU load → back. Each module keeps polling while hidden, so switching
-  always lands on fresh data, and each remembers which view it was on.
+  Claude usage → Claude history → CPU load → back. Each module keeps polling while
+  hidden, so switching always lands on fresh data, and each remembers which view it
+  was on.
 - **Rotate the encoder** to cycle the active module's views — `5H` → `7D` → per-model
-  windows (e.g. `FABLE`) on Claude usage, `1M`/`5M`/`15M` load windows on CPU. The Claude
-  list is rebuilt each poll, since the API adds and drops model windows; the selection
-  follows its label rather than its index so a refresh never jumps you elsewhere.
+  windows (e.g. `FABLE`) on Claude usage, `30D`/`7D` history windows on Claude history,
+  `1M`/`5M`/`15M` load windows on CPU. The Claude usage list is rebuilt each poll, since
+  the API adds and drops model windows; the selection follows its label rather than its
+  index so a refresh never jumps you elsewhere.
 - **Press `START`** to refresh the active module immediately. Three cyan dots replace the
   countdown while fetching and the status light fades. During cooldown a press still
   repaints (without refetching), so a blank screen is always recoverable — every button

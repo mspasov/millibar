@@ -16,6 +16,7 @@
  */
 import { envNumber } from './config';
 import { runHost } from './host';
+import { claudeStatsModule } from './modules/claude-stats';
 import { claudeUsageModule } from './modules/claude-usage';
 import { cpuModule } from './modules/cpu';
 
@@ -26,5 +27,6 @@ const REFRESH_COOLDOWN_MS = envNumber('REFRESH_COOLDOWN_MS', 5000, 0);
 
 await runHost([
   claudeUsageModule({ pollIntervalMs: POLL_INTERVAL_MS, refreshCooldownMs: REFRESH_COOLDOWN_MS }),
+  claudeStatsModule(),
   cpuModule(),
 ]);

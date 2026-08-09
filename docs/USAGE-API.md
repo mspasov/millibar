@@ -79,7 +79,9 @@ alternative: the per-window `limit_dollars`/`used_dollars`/`remaining_dollars` f
 paid extra-usage credits are being consumed. One percent of the 5-hour window is ±3
 minutes of time-budget; finer than that requires counting tokens locally (OTEL metrics or
 the transcript JSONL), which yields tokens but not percent-of-limit — the denominators
-are not disclosed. Windows also carry `group` and `severity` fields, and `scope` has a
+are not disclosed. There is also no history: this endpoint is current-state only, and
+Claude Code's own "last N days" graphs are built from local transcript data — see
+[USAGE-GRAPH.md](USAGE-GRAPH.md). Windows also carry `group` and `severity` fields, and `scope` has a
 `surface` key (null so far).
 
 Parsing notes, each of which has broken a real implementation:
