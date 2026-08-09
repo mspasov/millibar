@@ -5,16 +5,16 @@
     "": {
       "name": "busy",
       "dependencies": {
-        "@busy-app/busy-lib": "^0.17.0",
+        "@busy-app/busy-lib": "^0.18.0",
       },
       "devDependencies": {
-        "@types/bun": "latest",
+        "@types/bun": "^1.3.14",
         "typescript": "^7.0.2",
       },
     },
   },
   "packages": {
-    "@busy-app/busy-lib": ["@busy-app/busy-lib@0.17.0", "", { "dependencies": { "openapi-fetch": "^0.14.0", "protobufjs": "^8.0.1" } }, "sha512-N8x54N0sgrxKa0YSnA7BTBB4Hg0EXBH+TBtRgoHXJJTP+88QUw+nLwVaJL2PYRWIVxZZneKKmif+21twjskAOQ=="],
+    "@busy-app/busy-lib": ["@busy-app/busy-lib@0.18.0", "", { "dependencies": { "openapi-fetch": "^0.14.0", "protobufjs": "^8.0.1" } }, "sha512-3bYaISlM7QrssZcbia0u3tpAeYo5Xe6n16I42o5BxKj4O/xMaXadLgqHcgdrm2MpNXHwOQcVisYjPDedtc2efQ=="],
 
     "@types/bun": ["@types/bun@1.3.14", "", { "dependencies": { "bun-types": "1.3.14" } }, "sha512-h1hFqFVcvAvD9j9K7ZW7vd82aSA+rTdznZa+5bwvCwqSB1jmmfLcbIWhOLx1/+boy/xmjgCs/OMUL8hRJSmnPw=="],
 
