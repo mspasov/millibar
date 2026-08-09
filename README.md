@@ -46,7 +46,7 @@ All via environment variables; every one has a working default.
 | Variable | Default | Applies to |
 |---|---|---|
 | `BUSY_BAR_ADDR` | `10.0.4.20` | everything — IP, hostname, or full URL |
-| `POLL_INTERVAL_MS` | `300000` (5 min) | monitor — how often the usage API is polled |
+| `POLL_INTERVAL_MS` | `600000` (10 min) | monitor — how often the usage API is polled |
 | `REFRESH_COOLDOWN_MS` | `5000` | monitor — floor between button-triggered fetches |
 | `BUSY_PRIORITY` | `50` | monitor — draw priority, 1–100 |
 | `SWITCH_BUTTON` | `OK` | monitor — which button event the dial press reports as (`OK`\|`BACK`\|`START`) |

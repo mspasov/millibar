@@ -22,7 +22,10 @@ import { cpuModule } from './modules/cpu';
 
 // Validated, not just Number()-coerced: a NaN interval would make every
 // setTimeout fire immediately and hot-loop the rate-limited usage API.
-const POLL_INTERVAL_MS = envNumber('POLL_INTERVAL_MS', 5 * 60 * 1000, 1000);
+// 10 minutes, not the 5 the docs once suggested: the endpoint's budget is
+// shared with whatever else the account is doing (Claude Code sessions poll
+// it too), and 5-minute polling drew regular 429s in day-to-day use.
+const POLL_INTERVAL_MS = envNumber('POLL_INTERVAL_MS', 10 * 60 * 1000, 1000);
 const REFRESH_COOLDOWN_MS = envNumber('REFRESH_COOLDOWN_MS', 5000, 0);
 
 await runHost([

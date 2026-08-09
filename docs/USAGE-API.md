@@ -112,8 +112,13 @@ iterating — repeated manual refreshes during testing triggered a 60-second bac
 `Retry-After` in full rather than retrying on your normal interval, and gate any
 user-triggered refresh behind the same window so a button press cannot provoke it again.
 
-A sensible polling cadence is 5 minutes, which is what the monitor and ai-token-monitor
-both use.
+Do not assume you are the endpoint's only caller when picking a cadence. The rate budget
+appears to be per-account, not per-client: a 5-minute poll — the cadence ai-token-monitor
+uses, and this monitor's original default — drew regular 429s in day-to-day use
+(observed 2026-08-09), plausibly because active Claude Code sessions hit the same
+endpoint. The monitor now polls every 10 minutes and doubles its wait on consecutive
+429s (capped at 4× the interval), which is a better fit for a shared budget than
+retrying at full cadence the moment one Retry-After expires.
 
 ## Example
 

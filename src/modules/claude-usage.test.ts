@@ -79,6 +79,30 @@ describe('poll', () => {
     expect(await module.poll()).toEqual({ nextPollMs: 300_000, holdRefreshMs: 300_000 });
   });
 
+  test('consecutive 429s double the wait, capped at 4x the interval', async () => {
+    const module = makeModule(async () => {
+      throw new RateLimitError(60);
+    });
+    expect((await module.poll()).nextPollMs).toBe(300_000);
+    expect((await module.poll()).nextPollMs).toBe(600_000);
+    expect((await module.poll()).nextPollMs).toBe(1_200_000);
+    expect((await module.poll()).nextPollMs).toBe(1_200_000); // capped
+  });
+
+  test('a successful fetch resets the 429 escalation', async () => {
+    let limited = true;
+    const module = makeModule(async () => {
+      if (limited) throw new RateLimitError(60);
+      return usageFixture();
+    });
+    await module.poll();
+    await module.poll(); // escalated to 2x by now
+    limited = false;
+    await module.poll();
+    limited = true;
+    expect((await module.poll()).nextPollMs).toBe(300_000); // back to the base wait
+  });
+
   test('other errors keep the normal cadence and mark the data stale', async () => {
     let fail = true;
     const module = makeModule(async () => {

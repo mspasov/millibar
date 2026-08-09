@@ -67,6 +67,12 @@ const PACE_FILL_SCALE = 0.35;
  * (which is otherwise still fading when a fetch fails fast). */
 const FAIL_BLINK = { durationMs: 600, cycles: 1 };
 
+/** Cap on the 429 back-off, as a multiple of the poll interval. The endpoint's
+ * budget is shared with everything else the account does, so one Retry-After
+ * often isn't enough — consecutive 429s double the wait up to this cap rather
+ * than re-knocking every interval while the limit persists. */
+const MAX_BACKOFF_MULTIPLE = 4;
+
 interface View {
   label: string;
   window: UsageWindow;
@@ -124,12 +130,15 @@ export function claudeUsageModule(options: ClaudeUsageOptions): MonitorModule {
   let views: View[] = [];
   let viewIndex = 0;
   let stale = false;
+  /** Consecutive 429s, escalating the back-off. Reset only by a successful
+   * fetch — a network error in between says nothing about the rate limit. */
+  let rateLimitStreak = 0;
   /** Consecutive polls without fresh data (failures and 429 back-offs alike),
    * and when the stretch began — the material for the recovery line. */
   let failedPolls = 0;
   let staleSince = 0;
-  /** Utilization part of the last logged summary. At a 5-minute cadence an
-   * unchanged summary is ~288 near-identical lines a day, so only changes are
+  /** Utilization part of the last logged summary. At a 10-minute cadence an
+   * unchanged summary is ~144 near-identical lines a day, so only changes are
    * worth a line. */
   let lastSummary = '';
 
@@ -183,6 +192,7 @@ export function claudeUsageModule(options: ClaudeUsageOptions): MonitorModule {
         const sameView = views.findIndex((v) => v.label === previousLabel);
         viewIndex = sameView >= 0 ? sameView : Math.min(viewIndex, Math.max(views.length - 1, 0));
         stale = false;
+        rateLimitStreak = 0;
         retarget();
         if (cachePath) await saveCachedUsage(usage, cachePath);
 
@@ -213,7 +223,9 @@ export function claudeUsageModule(options: ClaudeUsageOptions): MonitorModule {
           // every backed-off cycle for as long as the API stays rate-limited.
           // Hold button-triggered refreshes off for the whole back-off, not
           // just the usual cooldown, so a 429 isn't immediately provoked again.
-          const waitMs = Math.max(error.retryAfterSeconds * 1000, pollIntervalMs);
+          const backoffMs = pollIntervalMs * Math.min(2 ** rateLimitStreak, MAX_BACKOFF_MULTIPLE);
+          rateLimitStreak += 1;
+          const waitMs = Math.max(error.retryAfterSeconds * 1000, backoffMs);
           ctx?.log(`rate limited; showing stale values, next poll at ${clockTime(Date.now() + waitMs)} (refresh held)`);
           return { nextPollMs: waitMs, holdRefreshMs: waitMs };
         }
