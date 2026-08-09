@@ -41,10 +41,14 @@ export interface CpuOptions {
   /** Sweep timings, overridable so tests can run instant (0). */
   sweepMs?: number;
   sweepCoolMs?: number;
+  /** Injectable samplers for tests. Default to the real machine. */
+  loadavg?: () => number[];
+  cores?: number;
 }
 
 export function cpuModule(options: CpuOptions = {}): MonitorModule {
-  const cores = os.cpus().length;
+  const cores = options.cores ?? os.cpus().length;
+  const sample = options.loadavg ?? os.loadavg;
   let ctx: ModuleContext | null = null;
   let screenIndex = 0;
   let loads: number[] = [0, 0, 0];
@@ -76,7 +80,7 @@ export function cpuModule(options: CpuOptions = {}): MonitorModule {
     },
 
     async poll(): Promise<PollResult> {
-      loads = os.loadavg();
+      loads = sample();
       retarget(MIN_SWEEP_DELTA);
       // Local sampling cannot fail or be rate-limited: no refresh hold at all.
       return { nextPollMs: POLL_MS, holdRefreshMs: 0 };
