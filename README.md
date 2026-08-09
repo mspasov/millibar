@@ -11,6 +11,42 @@ modules — Claude Code usage limits, token history, the Grok weekly credit pool
 load, and whatever you add next — rotate it to cycle the screens inside a module, and
 press `START` to refresh, with the status light fading cyan while it fetches.
 
+## What it looks like
+
+Captured from the device's own framebuffer (`tools/screenshot.ts`, upscaled 8×; the
+panel is 72×16).
+
+**Claude gauge** — one limit window at a time: label, countdown to the window's reset,
+percentage, and the severity-coloured bar. The faint notch in the track is the pace
+tick — fill past it means tokens are going faster than the window.
+
+![Claude gauge: the 5-hour window at 13%, 3:26 to reset](docs/img/gauge.png)
+
+**Claude dashboard** — every window at once: one slim bar per window under the detail
+row for the selected one, whose bar runs at full brightness behind the marker at the
+left edge while the other rows dim.
+
+![Claude dashboard: detail row for the 5-hour window above three slim per-window bars](docs/img/dash.png)
+
+**Claude history** — the last 30 days of token spend, one stacked per-model bar per
+day…
+
+![Claude history: 30 days of stacked per-model bars](docs/img/history-30d.png)
+
+…and its `ALL` screen, the all-time calendar heatmap, one cell per day:
+
+![Claude history: the all-time calendar heatmap](docs/img/history-heatmap.png)
+
+**Grok weekly** — the SuperGrok shared credit pool on the same gauge layout, counting
+down to the weekly reset.
+
+![Grok weekly: the shared credit pool at 3%, 4 days 8 hours to reset](docs/img/grok.png)
+
+**CPU load** — load averages normalised by core count: sustained pressure, not
+instantaneous CPU%.
+
+![CPU load: the 1-minute window at 13%](docs/img/cpu.png)
+
 ## Setup
 
 ```sh

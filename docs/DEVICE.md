@@ -150,6 +150,16 @@ so a default-priority draw won't interrupt a focus session.
 > `DELETE /api/display/draw?application_name=…`. This bites when an element is drawn
 > conditionally: a progress bar omitted at 0% keeps showing its previous width.
 
+> **The persisted element set belongs to the `application_name`, not the process.** Two
+> processes drawing under the same name share one merged set — observed capturing README
+> screenshots over the resident monitor (both under the default `claude_usage`): the
+> resident's minute-heartbeat repaint interleaved its gauge elements into the capture's
+> CPU screen, garbling both. Ids are namespaced per module, so nothing collided — both
+> sets simply rendered. A script drawing over a running monitor therefore needs its own
+> application name *as well as* the higher priority: the priority only wins the draw
+> races, it doesn't fence off the element set. `runHost`'s `applicationName` option
+> exists for exactly this.
+
 > **An id's element type is fixed.** Redrawing an existing id as a *different* type
 > (text → rectangle or the reverse) is rejected with `400 {"error":"Bad request"}` —
 > and the 400 is **not atomic**: elements earlier in the same request still land, so one
