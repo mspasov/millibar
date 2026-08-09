@@ -109,6 +109,7 @@ All via environment variables; every one has a working default.
 | `REFRESH_COOLDOWN_MS` | `5000` | monitor — floor between button-triggered fetches |
 | `BUSY_PRIORITY` | `50` | monitor — draw priority, 1–100 |
 | `SWITCH_BUTTON` | `OK` | monitor — which button event the dial press reports as (`OK`\|`BACK`\|`START`) |
+| `ANIMATIONS` | `on` | monitor — `off` stills everything that moves: value changes snap instead of sweeping, and the history screens appear without their intros. Same as `mbar --no-animations` (the flag wins) |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | usage — where credentials are read from off-macOS |
 
 ## Modules

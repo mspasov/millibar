@@ -516,6 +516,11 @@ export function encodeHistoryAsset(days: DayTokens[]): HistoryAsset {
 }
 
 export interface ClaudeHistoryOptions {
+  /** False disables the appearance intros — every screen draws its static
+   * section directly (mbar's ANIMATIONS switch). Playback-only: the asset
+   * still carries the intro sections, so the encoder and the upload path
+   * don't fork on a display preference. */
+  intros?: boolean;
   /** Local file read — 60s keeps the screen a minute behind Claude Code's own
    * recompute at zero cost. */
   pollIntervalMs?: number;
@@ -532,6 +537,7 @@ export interface ClaudeHistoryOptions {
 
 export function claudeHistoryModule(options: ClaudeHistoryOptions = {}): MonitorModule {
   const {
+    intros = true,
     pollIntervalMs = 60_000,
     statsPath = statsCachePath(),
     todayImpl = utcToday,
@@ -560,6 +566,7 @@ export function claudeHistoryModule(options: ClaudeHistoryOptions = {}): Monitor
    * intro section, and once it has played (margin inside the hold window)
    * the element swaps to the static section. */
   const startIntro = (): void => {
+    if (!intros) return; // render falls through to the static section
     if (uploadedMtimeMs === null) return; // no chart element yet
     const screen = SCREENS[screenIndex]!;
     cancelIntroSwap?.();

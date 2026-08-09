@@ -470,6 +470,15 @@ describe('module', () => {
     expect(byId(module.render({ refreshing: false }), 'chart').section).toBe('intro-heat');
   });
 
+  test('intros: false draws static sections directly and never arms a swap', async () => {
+    const { module, swaps } = makeModule([day('2026-08-06', { 'claude-fable-5': 100 })], { intros: false });
+    await module.poll(); // first upload — normally the animated reveal
+    expect(byId(module.render({ refreshing: false }), 'chart').section).toBe('30d');
+    module.onEncoder!(1);
+    expect(byId(module.render({ refreshing: false }), 'chart').section).toBe('7d');
+    expect(swaps).toHaveLength(0); // nothing scheduled, nothing to cancel on shutdown
+  });
+
   test('a data re-upload mid-run does not replay the intro', async () => {
     const { module, path, swaps } = makeModule([day('2026-08-06', { 'claude-fable-5': 100 })]);
     await module.poll();

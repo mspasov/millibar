@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { apiPath, envNumber, httpBase, isProxyAddr, wsBase } from './config';
+import { apiPath, envFlag, envNumber, httpBase, isProxyAddr, wsBase } from './config';
 
 describe('httpBase / wsBase', () => {
   test('bare IPs and hostnames get a scheme prefixed', () => {
@@ -80,3 +80,33 @@ describe('envNumber', () => {
   });
 });
 
+describe('envFlag', () => {
+  const NAME = 'MBAR_TEST_ENV_FLAG';
+  afterEach(() => {
+    delete process.env[NAME];
+  });
+
+  test('unset or empty falls back', () => {
+    expect(envFlag(NAME, true)).toBe(true);
+    expect(envFlag(NAME, false)).toBe(false);
+    process.env[NAME] = '';
+    expect(envFlag(NAME, true)).toBe(true);
+  });
+
+  test('accepts 1/0, true/false, on/off, any case', () => {
+    for (const value of ['1', 'true', 'on', 'TRUE', 'On']) {
+      process.env[NAME] = value;
+      expect(envFlag(NAME, false)).toBe(true);
+    }
+    for (const value of ['0', 'false', 'off', 'FALSE', 'Off']) {
+      process.env[NAME] = value;
+      expect(envFlag(NAME, true)).toBe(false);
+    }
+  });
+
+  test('throws on garbage instead of silently falling back', () => {
+    // A typo'd 'flase' quietly meaning "on" would look applied and not be.
+    process.env[NAME] = 'flase';
+    expect(() => envFlag(NAME, true)).toThrow('MBAR_TEST_ENV_FLAG');
+  });
+});

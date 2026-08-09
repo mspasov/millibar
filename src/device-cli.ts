@@ -35,6 +35,10 @@ Monitor (the default — no arguments):
                          Press the dial to switch modules, START to refresh,
                          rotate the encoder to cycle screens. Ctrl-C stops and
                          clears the display.
+  --no-animations        still everything that moves: value changes snap
+                         instead of sweeping, history screens skip their
+                         intros. Equivalent to ANIMATIONS=off; the flag wins
+                         (--animations overrides an inherited off).
 
 Connection routes (config: ${configPath()}):
 
@@ -66,8 +70,9 @@ Environment:
   BUSY_BAR_TOKEN         cloud token for routes that don't carry their own
   BUSY_BAR_PASSWORD      HTTP Access Password, likewise
   MBAR_CONFIG            route config path
-  POLL_INTERVAL_MS, REFRESH_COOLDOWN_MS, BUSY_PRIORITY, SWITCH_BUTTON
-                         monitor tuning — see README`;
+  POLL_INTERVAL_MS, REFRESH_COOLDOWN_MS, BUSY_PRIORITY, SWITCH_BUTTON,
+  ANIMATIONS             monitor tuning — see README (ANIMATIONS is what
+                         --[no-]animations sets)`;
 }
 
 function fileNote(): string {

@@ -11,14 +11,15 @@
  * subcommands. Adding a monitor means writing one module file and
  * registering it here.
  *
- * Usage: mbar [--route <names>] [--help | probe | routes | show | init |
- *        set | rm | order] (after `bun link`), or bun run src/mbar.ts —
- *        no arguments runs the monitor
+ * Usage: mbar [--route <names>] [--[no-]animations] [--help | probe |
+ *        routes | show | init | set | rm | order] (after `bun link`), or
+ *        bun run src/mbar.ts — no arguments runs the monitor
  * Env:   BUSY_BAR_ADDR, BUSY_BAR_ROUTE, BUSY_BAR_TOKEN, BUSY_BAR_PASSWORD,
  *        MBAR_CONFIG, BUSY_PRIORITY, POLL_INTERVAL_MS, REFRESH_COOLDOWN_MS,
- *        SWITCH_BUTTON (which button the dial press reports as; default OK)
+ *        SWITCH_BUTTON (which button the dial press reports as; default OK),
+ *        ANIMATIONS (off disables the sweeps and the history intros)
  */
-import { envNumber } from './config';
+import { envFlag, envNumber } from './config';
 import { isDeviceCommand, mbarUsage, runDeviceCommand } from './device-cli';
 import { runHost } from './host';
 import { claudeDashModule } from './modules/claude-dash';
@@ -44,6 +45,11 @@ for (let i = argv.length - 1; i >= 0; i--) {
     argv.splice(i, 2);
   } else if (arg.startsWith('--route=')) {
     process.env.BUSY_BAR_ROUTE = arg.slice('--route='.length);
+    argv.splice(i, 1);
+  } else if (arg === '--animations' || arg === '--no-animations') {
+    // The bare positive spelling exists to override an ANIMATIONS=off
+    // inherited from the environment, symmetric with the negative.
+    process.env.ANIMATIONS = arg === '--animations' ? 'on' : 'off';
     argv.splice(i, 1);
   }
 }
@@ -71,6 +77,13 @@ if (command !== undefined) {
 const POLL_INTERVAL_MS = envNumber('POLL_INTERVAL_MS', 10 * 60 * 1000, 1000);
 const REFRESH_COOLDOWN_MS = envNumber('REFRESH_COOLDOWN_MS', 5000, 0);
 
+// ANIMATIONS=off stills everything that moves: the value sweeps collapse to
+// snaps (a zero-length sweep is PctSweep's documented off switch, exercised
+// by every module test) and the history screens draw their static sections
+// without the appearance intros.
+const ANIMATIONS = envFlag('ANIMATIONS', true);
+const sweepOptions = ANIMATIONS ? {} : { sweepMs: 0, sweepCoolMs: 0 };
+
 // Both usage modules poll on the same cadence; the deduplicated fetcher makes
 // that one request per cycle against the rate-limited endpoint. The 30s TTL
 // covers the near-simultaneous twin polls (and puts a freshness floor under
@@ -81,11 +94,12 @@ const usageOptions = {
   pollIntervalMs: POLL_INTERVAL_MS,
   refreshCooldownMs: REFRESH_COOLDOWN_MS,
   fetchUsageImpl: dedupedFetchUsage(30_000),
+  ...sweepOptions,
 };
 
 await runHost([
   claudeGaugeModule(usageOptions),
   claudeDashModule({ ...usageOptions, quiet: true }),
-  claudeHistoryModule(),
-  cpuModule(),
+  claudeHistoryModule({ intros: ANIMATIONS }),
+  cpuModule(sweepOptions),
 ]);

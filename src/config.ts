@@ -50,6 +50,18 @@ export function wsBase(addr = deviceAddr()): string {
   return httpBase(addr).replace(/^http/, 'ws');
 }
 
+/** Boolean env var, or `fallback` when unset/empty. Accepts 1/0, true/false,
+ * on/off (any case); anything else throws — `ANIMATIONS=flase` silently
+ * meaning "on" would be a setting that looks applied and isn't. */
+export function envFlag(name: string, fallback: boolean): boolean {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const value = raw.toLowerCase();
+  if (value === '1' || value === 'true' || value === 'on') return true;
+  if (value === '0' || value === 'false' || value === 'off') return false;
+  throw new Error(`${name} must be one of 1/0, true/false, on/off, got '${raw}'`);
+}
+
 /** Numeric env var, or `fallback` when unset/empty. Throws on anything
  * non-numeric or below `min` instead of letting NaN or a hot-loop-inducing
  * zero through. */
