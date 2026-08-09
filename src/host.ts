@@ -49,6 +49,14 @@ export interface HostOptions {
   /** false stills the quit-confirm drain and skips the turn-off farewell
    * (mbar's ANIMATIONS switch). */
   animations?: boolean;
+  /** Aborting stops the host exactly as SIGINT does (no farewell). A seam for
+   * tests and embedders — mbar itself quits via signals and double-BACK. */
+  signal?: AbortSignal;
+  /** Test seams: a session whose transports are stubbed makes every draw and
+   * the shutdown clear observable without a device, and `exit` catches the
+   * process exit a shutdown ends in. Production omits both. */
+  session?: DisplaySession;
+  exit?: (code?: number) => void;
 }
 
 function envSwitchButton(): Button | undefined {
@@ -69,11 +77,14 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
   const switchButton = options.switchButton ?? envSwitchButton() ?? 'OK';
 
   const controller = new AbortController();
-  const session = new DisplaySession({
-    applicationName,
-    priority,
-    timeoutS: Math.ceil((heartbeatMs * 1.5) / 1000),
-  });
+  const exit = options.exit ?? ((code?: number) => process.exit(code));
+  const session =
+    options.session ??
+    new DisplaySession({
+      applicationName,
+      priority,
+      timeoutS: Math.ceil((heartbeatMs * 1.5) / 1000),
+    });
 
   let activeIndex = 0;
   const active = () => runners[activeIndex]!;
@@ -288,7 +299,8 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
       // A second signal while the farewell/clear is in flight means "now":
       // skip the remaining niceties. Anything left on screen self-expires via
       // the element timeout. No argument, so a fatal path's exitCode survives.
-      process.exit();
+      exit();
+      return;
     }
     exiting = true;
     controller.abort();
@@ -308,13 +320,15 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
       // re-register the application on the device.
       await ledChain.catch(() => {});
       await session.clear().catch(() => {});
-      process.exit(0);
+      exit(0);
     })();
   }
 
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.on(signal, () => shutdown());
   }
+  if (options.signal?.aborted) shutdown();
+  else options.signal?.addEventListener('abort', () => shutdown(), { once: true });
 
   try {
     await Promise.all([
