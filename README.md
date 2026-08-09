@@ -7,9 +7,9 @@ pixel display, a rotary encoder, three buttons, a five-position mode switch, and
 status light — from TypeScript.
 
 The headline app is a **modular monitor**: press the dial to switch between monitor
-modules — Claude Code usage limits, token history, CPU load, and whatever you add next — rotate it to
-cycle the screens inside a module, and press `START` to refresh, with the status light
-fading cyan while it fetches.
+modules — Claude Code usage limits, token history, the Grok weekly credit pool, CPU
+load, and whatever you add next — rotate it to cycle the screens inside a module, and
+press `START` to refresh, with the status light fading cyan while it fetches.
 
 ## Setup
 
@@ -27,7 +27,7 @@ it hangs or errors, see [Troubleshooting](#troubleshooting).
 | Command | What it does |
 |---|---|
 | `bun run tools/smoke.ts` | Smoke test — prints device status and busy-timer state. |
-| `mbar` (or `bun run src/mbar.ts`) | **The monitor.** Switchable modules on the display: Claude Code limits, token history (last 30/7 days, stacked by model), and CPU load. Dial press switches modules, rotation cycles screens, `START` refreshes, `BACK` twice quits. `--modules gauge,cpu` picks which modules run (and their order). |
+| `mbar` (or `bun run src/mbar.ts`) | **The monitor.** Switchable modules on the display: Claude Code limits, token history (last 30/7 days, stacked by model), the Grok weekly credit pool, and CPU load. Dial press switches modules, rotation cycles screens, `START` refreshes, `BACK` twice quits. `--modules gauge,cpu` picks which modules run (and their order). |
 | `bun run src/input.ts` | Prints button, switch, and encoder events live. |
 | `bun run src/led.ts pulse "#00CCFF" 1400 2` | Pulses the status light — colour, duration ms, cycles. |
 | `bun run src/led.ts fade "#F00,#0F0,#00F" 3000 hsv` | Crossfades through colour stops — stops, duration ms, `rgb`\|`hsv`. |
@@ -109,7 +109,7 @@ All via environment variables; every one has a working default.
 | `REFRESH_COOLDOWN_MS` | `5000` | monitor — floor between button-triggered fetches |
 | `BUSY_PRIORITY` | `50` | monitor — draw priority, 1–100 |
 | `SWITCH_BUTTON` | `OK` | monitor — which button event the dial press reports as (`OK`\|`BACK`\|`START`) |
-| `MBAR_MODULES` | unset (all) | monitor — which modules run and their cycle order, comma-separated (`gauge,dash,history,cpu`); the first named is the startup module. Same as `mbar --modules` (the flag wins) |
+| `MBAR_MODULES` | unset (all) | monitor — which modules run and their cycle order, comma-separated (`gauge,dash,history,grok,cpu`); the first named is the startup module. Unset includes `grok` only when a `grok login` exists. Same as `mbar --modules` (the flag wins) |
 | `ANIMATIONS` | `on` | monitor — `off` stills everything that moves: value changes snap instead of sweeping, and the history screens appear without their intros. Same as `mbar --no-animations` (the flag wins) |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | usage — where credentials are read from off-macOS |
 
@@ -124,6 +124,9 @@ Each is usable on its own, not just by the monitor.
   behind its own usage graphs (there is no server endpoint for history). Drawn by the
   monitor's history module as stacked per-model bars over the last 30 or 7 days, plus an
   all-time calendar heatmap. See [USAGE-GRAPH.md](docs/USAGE-GRAPH.md).
+- **`src/grok-usage.ts`** — reads the SuperGrok shared weekly credit pool (the data
+  behind the Grok CLI's `/usage` panel) with the OIDC token `grok login` already stores.
+  See [GROK-USAGE-API.md](docs/GROK-USAGE-API.md).
 - **`src/connection.ts`** — the route resolver behind every device request:
   loads the persistent config, probes routes in priority order, injects
   credentials (`deviceFetch()`, `wsUrl()`, `connectedBar()`), and re-probes on
@@ -151,10 +154,12 @@ Each is usable on its own, not just by the monitor.
 - **`src/host.ts`** — `runHost()` runs modules against one device: input routing, module
   switching, the heartbeat repaint, status-light ownership, shutdown.
 - **`src/modules/`** — the modules themselves: `claude-gauge.ts` (one limit
-  window at a time), `claude-dash.ts` (every window at once; their shared
-  fetch/state machinery lives in `limit-poller.ts`), `claude-history.ts`,
-  `cpu.ts` (1/5/15-minute load averages normalised by core count — sustained
-  pressure, not instantaneous CPU%).
+  window at a time, on the provider-agnostic layout in `limit-gauge.ts`),
+  `claude-dash.ts` (every window at once; the shared poll/stale/cache
+  machinery lives in `limit-poller.ts`), `claude-history.ts`, `grok-gauge.ts`
+  (the Grok weekly pool on the same gauge layout), `cpu.ts` (1/5/15-minute
+  load averages normalised by core count — sustained pressure, not
+  instantaneous CPU%).
 - **`src/mbar.ts`** — the entry point that registers modules with the host.
 
 ### Monitor behaviour
@@ -185,15 +190,18 @@ device actually sustains.
 
 - **Press the dial** (its press arrives as the `OK` button event — override with
   `SWITCH_BUTTON` if your press reports differently) to switch to the next module:
-  Claude gauge → Claude dashboard → Claude history → CPU load → back. Each module keeps
-  polling while hidden, so switching always lands on fresh data, and each remembers
-  which screen it was on.
+  Claude gauge → Claude dashboard → Claude history → Grok weekly → CPU load → back.
+  (The Grok gauge — the SuperGrok weekly credit pool on the same layout — joins the
+  cycle only when a `grok login` exists; without one it sits out rather than erroring.)
+  Each module keeps polling while hidden, so switching always lands on fresh data, and
+  each remembers which screen it was on.
 - **Rotate the encoder** to cycle the active module's screens — `5H` → `7D` → per-model
   windows (e.g. `FABLE`) on both limit modules (on the dashboard the marker walks the
   bars), `30D`/`7D` bars → `ALL` heatmap on Claude history, `1M`/`5M`/`15M` load windows
-  on CPU. The limit window list is rebuilt each poll, since the API adds and drops model
-  windows; the selection follows its label rather than its index so a refresh never
-  jumps you elsewhere.
+  on CPU. The Grok gauge has a single `GROK` screen (the weekly pool is its whole
+  scope), so rotation does nothing there. The limit window list is rebuilt each poll,
+  since the API adds and drops model windows; the selection follows its label rather
+  than its index so a refresh never jumps you elsewhere.
 - **Press `START`** to refresh the active module immediately. Three cyan dots replace the
   countdown while fetching and the status light fades. During cooldown a press still
   repaints (without refetching), so a blank screen is always recoverable — every button
@@ -205,9 +213,12 @@ device actually sustains.
   fade), and the shown values dim to stale grey until a fetch succeeds. A rate-limit
   back-off (429) skips the blink — it's routine, and would otherwise recur every
   backed-off cycle — but still dims.
-- The last successful usage read is cached in `~/.cache/mbar/usage.json`, so a restart
-  while the API is unreachable or rate-limited starts from the previous values — grey
-  with a `?` on the label, like any stale data — until a live fetch replaces them.
+- The last successful usage read is cached in `~/.cache/mbar/usage.json`
+  (`grok-usage.json` for the Grok module), so a restart while the API is unreachable or
+  rate-limited starts from the previous values — grey with a `?` on the label, like any
+  stale data — until a live fetch replaces them. Grok tokens expire after ~6 hours; the
+  gauge dims to stale over an expired one and recovers on its own the next time any
+  `grok` CLI use refreshes the stored token.
 - **Moving the mode switch off `OFF`** silences the monitor — no repaints, no
   status-light frames, no button or encoder handling — because the system screens own
   the display there. Back on `OFF`, it repaints once the device's power-down animation
@@ -228,9 +239,12 @@ A module is one file in `src/modules/` implementing `MonitorModule` (see
 cadence and refresh cooldown, a `render()` that returns the element list for its current
 state, and optionally `onEncoder()` for its screens. Register it in
 [src/mbar.ts](src/mbar.ts) and the host does the rest — id namespacing, element
-scrubbing on switch, timeouts, input routing, and status-light arbitration. A Grok-usage
-module, say, is a sibling fetch client next to `src/usage.ts` plus a factory shaped like
-[src/modules/claude-gauge.ts](src/modules/claude-gauge.ts); nothing else changes.
+scrubbing on switch, timeouts, input routing, and status-light arbitration. The Grok
+module is the worked example: a sibling fetch client next to `src/usage.ts`
+([src/grok-usage.ts](src/grok-usage.ts)) plus a thin binding
+([src/modules/grok-gauge.ts](src/modules/grok-gauge.ts)) of the shared gauge layout
+([src/modules/limit-gauge.ts](src/modules/limit-gauge.ts)) to a `UsageSource`; nothing
+else changed.
 
 ## Troubleshooting
 
@@ -248,6 +262,10 @@ or draw higher. Note that two draw-based scripts running at once will fight over
 
 **`no Claude Code OAuth credentials found`.** Run `claude auth` to sign in.
 
+**No Grok module in the cycle.** The default roster includes it only when
+`~/.grok/auth.json` exists — run `grok login` (naming it explicitly with
+`--modules grok` instead makes the missing login a hard error).
+
 **Usage numbers dimmed with a `?` label.** The last fetch failed and stale values are being
 shown. Repeated manual refreshes can trigger a `429`; the monitor honours `Retry-After` and
 recovers on its own.
@@ -258,6 +276,8 @@ recovers on its own.
   drawing, priorities, the animation format, input events, the status light, and the
   spec's inaccuracies. Read this before touching device code.
 - **[USAGE-API.md](docs/USAGE-API.md)** — the undocumented Claude Code usage endpoint.
+- **[GROK-USAGE-API.md](docs/GROK-USAGE-API.md)** — the undocumented Grok weekly
+  credit-pool endpoint behind the Grok gauge.
 - **[USAGE-GRAPH.md](docs/USAGE-GRAPH.md)** — where the "last N days" usage graphs come
   from (local stats, not a server endpoint) and how the history module renders them.
 - **[CLAUDE.md](CLAUDE.md)** — working practices for this repo.
@@ -265,5 +285,6 @@ recovers on its own.
 ## Requirements
 
 Bun 1.3+, a BUSY Bar reachable over USB-Ethernet, the LAN, or the cloud proxy, and
-Claude Code signed in (for the monitor).
+Claude Code signed in (for the monitor). The Grok gauge additionally wants a
+`grok login`; without one it simply sits out of the module cycle.
 Credential reading is implemented for the macOS Keychain with a file fallback elsewhere.

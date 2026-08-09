@@ -19,7 +19,8 @@
  * Env:   BUSY_BAR_ADDR, BUSY_BAR_ROUTE, BUSY_BAR_TOKEN, BUSY_BAR_PASSWORD,
  *        MBAR_CONFIG, BUSY_PRIORITY, POLL_INTERVAL_MS, REFRESH_COOLDOWN_MS,
  *        MBAR_MODULES (which modules run, comma-separated, in cycle order:
- *        gauge, dash, history, cpu — unset runs all),
+ *        gauge, dash, history, grok, cpu — unset runs all, with grok
+ *        joining only when a `grok login` exists),
  *        SWITCH_BUTTON (which button the dial press reports as; default OK),
  *        ANIMATIONS (off disables the sweeps, the history intros, and
  *        the quit prompt's drain and turn-off farewell)
@@ -28,10 +29,12 @@ import { envFlag, envNumber } from './config';
 import { isDeviceCommand, mbarUsage, runDeviceCommand } from './device-cli';
 import { runHost } from './host';
 import { selectModules } from './module';
+import { hasGrokCredentials } from './grok-usage';
 import { claudeDashModule } from './modules/claude-dash';
 import { claudeGaugeModule } from './modules/claude-gauge';
 import { claudeHistoryModule } from './modules/claude-history';
 import { cpuModule } from './modules/cpu';
+import { grokGaugeModule } from './modules/grok-gauge';
 import { dedupedFetchUsage } from './usage';
 
 // Flags work on any invocation (monitor or subcommand) and anywhere in the
@@ -55,7 +58,7 @@ for (let i = argv.length - 1; i >= 0; i--) {
   } else if (arg === '--modules') {
     const value = argv[i + 1];
     if (value === undefined) {
-      console.error('--modules needs a value: module name(s), comma-separated — gauge, dash, history, cpu');
+      console.error('--modules needs a value: module name(s), comma-separated — gauge, dash, history, grok, cpu');
       process.exit(1);
     }
     process.env.MBAR_MODULES = value;
@@ -115,6 +118,15 @@ const usageOptions = {
   ...sweepOptions,
 };
 
+// The Grok module polls its own endpoint on the shared cadence. No deduped
+// wrapper: it is the endpoint's only consumer here (the Claude TTL fetcher
+// exists because two modules share one API).
+const grokOptions = {
+  pollIntervalMs: POLL_INTERVAL_MS,
+  refreshCooldownMs: REFRESH_COOLDOWN_MS,
+  ...sweepOptions,
+};
+
 // The full roster, in default cycle order. `--modules gauge,cpu` (or
 // MBAR_MODULES) narrows and reorders it — the first name is the startup
 // screen. Factories, not instances: only selected modules get constructed,
@@ -123,10 +135,18 @@ const roster = [
   { aliases: ['gauge', 'claude-gauge'], value: () => claudeGaugeModule(usageOptions) },
   { aliases: ['dash', 'claude-dash'], value: () => claudeDashModule({ ...usageOptions, quiet: true, persist: false }) },
   { aliases: ['history', 'claude-history'], value: () => claudeHistoryModule({ intros: ANIMATIONS }) },
+  { aliases: ['grok', 'grok-gauge'], value: () => grokGaugeModule(grokOptions) },
   { aliases: ['cpu'], value: () => cpuModule(sweepOptions) },
 ];
 
-let selected = roster.map((choice) => choice.value);
+// The default roster only includes Grok when a `grok login` exists — missing
+// credentials would otherwise kill the whole monitor at first poll for
+// everyone who never installed the Grok CLI. Naming it explicitly still gets
+// the loud fatal error, which is the right answer to `--modules grok` on a
+// machine with nothing to show.
+let selected = roster
+  .filter((choice) => choice.aliases[0] !== 'grok' || hasGrokCredentials())
+  .map((choice) => choice.value);
 if (process.env.MBAR_MODULES) {
   try {
     selected = selectModules(process.env.MBAR_MODULES, roster);

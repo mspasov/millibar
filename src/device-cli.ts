@@ -36,9 +36,9 @@ Monitor (the default — no arguments):
                          rotate the encoder to cycle screens, BACK twice to
                          quit. Ctrl-C also stops and clears the display.
   --modules <names>      which modules run, comma-separated, in cycle order:
-                         gauge, dash, history, cpu. The first named is the
-                         startup screen; unset runs all four. Equivalent to
-                         MBAR_MODULES.
+                         gauge, dash, history, grok, cpu. The first named is
+                         the startup screen; unset runs all (grok only when
+                         a \`grok login\` exists). Equivalent to MBAR_MODULES.
   --no-animations        still everything that moves: value changes snap
                          instead of sweeping, history screens skip their
                          intros, quitting skips the turn-off farewell.
