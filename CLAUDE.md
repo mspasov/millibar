@@ -52,7 +52,11 @@ own uncommitted edits.
   peer's edits share a file, stage a mine-only version, commit, restore the combined
   state. If in doubt that the committed subset stands alone, prove it in a throwaway
   worktree (`git worktree add … HEAD` → check → test → remove).
-- There is no git remote. Nothing can be pushed; don't offer to.
+- The remote (`github.com/mspasov/millibar`) is public. Never push unless the user asks
+  in that session — a push publishes every commit on the branch, including peers' work
+  you can't vouch for. History was scrubbed once before first publish (a device serial);
+  anything secret-shaped in a commit means stop and ask before it goes anywhere near
+  `origin`.
 - Verify a peer session's claims yourself before relaying them. And a subagent's prompt
   must carry the credential rules (USAGE-API.md, "Handling the token") — transcripts
   persist on disk, and a delegated agent once printed a live token into one.
