@@ -24,7 +24,7 @@
  *   bun run src/led.ts fade  [#A,#B,...] [ms] [rgb|hsv]
  */
 
-import { httpBase } from './config';
+import { DEFAULT_APP_NAME, httpBase } from './config';
 import { deviceFetch } from './connection';
 
 type Rgb = [number, number, number];
@@ -182,7 +182,7 @@ const FILLER_ELEMENT = {
 function createSender(options: TransportOptions) {
   // An explicit addr bypasses the connection config, like everywhere else.
   const explicitBase = options.addr ? httpBase(options.addr) : undefined;
-  const applicationName = options.applicationName ?? 'claude_usage';
+  const applicationName = options.applicationName ?? DEFAULT_APP_NAME;
   const priority = options.priority ?? 50;
 
   /** `signal` cancels an in-flight frame at once — without it an abort is only

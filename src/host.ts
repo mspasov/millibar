@@ -11,7 +11,7 @@
  * OFF pauses all drawing (and input handling) until it returns — the system
  * screens own the display there, and our draws would land on top of them.
  */
-import { envNumber } from './config';
+import { DEFAULT_APP_NAME, envNumber } from './config';
 import { describeConnection, resolveConnection } from './connection';
 import { DisplaySession, type DrawElement } from './display';
 import { listenInput, type Button, type InputEvent } from './input';
@@ -35,9 +35,10 @@ const SWITCH_RESUME_MS = 1200;
 const BUILTIN_ERROR_NAMES = new Set(['Error', 'TypeError', 'RangeError', 'ReferenceError', 'SyntaxError']);
 
 export interface HostOptions {
-  /** Kept as the historical 'claude_usage' by default: the device rejects
-   * same-priority draws from a different application_name while another app
-   * holds the display, so renaming mid-flight risks losing the screen. */
+  /** A script drawing over a running monitor needs its own name here as well
+   * as a higher priority: the device rejects same-priority draws from a
+   * different application_name while another app holds the display, and the
+   * persisted element set is keyed per name (see DEVICE.md). */
   applicationName?: string;
   priority?: number;
   /** Cadence of the keep-fresh repaint (countdowns, pace ticks) — also the
@@ -71,7 +72,7 @@ function envSwitchButton(): Button | undefined {
 
 export async function runHost(modules: MonitorModule[], options: HostOptions = {}): Promise<void> {
   if (modules.length === 0) throw new Error('runHost needs at least one module');
-  const applicationName = options.applicationName ?? 'claude_usage';
+  const applicationName = options.applicationName ?? DEFAULT_APP_NAME;
   const priority = options.priority ?? envNumber('BUSY_PRIORITY', 50, 1);
   const heartbeatMs = options.heartbeatMs ?? 60_000;
   const switchButton = options.switchButton ?? envSwitchButton() ?? 'OK';

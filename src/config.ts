@@ -14,6 +14,13 @@
 
 export const DEFAULT_ADDR = '10.0.4.20';
 
+/** The application_name draws, uploads, and LED pulses run under by default.
+ * The device keys the persisted element set and `/ext/user_assets/<app>` to
+ * this name, so a rename only takes effect when the resident monitor
+ * restarts — and strands any assets uploaded under the old name (this was
+ * 'claude_usage' before the project was named). */
+export const DEFAULT_APP_NAME = 'mbar';
+
 /** The configured device address, verbatim — for busy-lib, which normalises
  * schemes itself, and for log lines. */
 export function deviceAddr(explicit?: string): string {

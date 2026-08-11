@@ -152,7 +152,8 @@ so a default-priority draw won't interrupt a focus session.
 
 > **The persisted element set belongs to the `application_name`, not the process.** Two
 > processes drawing under the same name share one merged set — observed capturing README
-> screenshots over the resident monitor (both under the default `claude_usage`): the
+> screenshots over the resident monitor (both under the host's default application
+> name, `claude_usage` at the time — `mbar` today): the
 > resident's minute-heartbeat repaint interleaved its gauge elements into the capture's
 > CPU screen, garbling both. Ids are namespaced per module, so nothing collided — both
 > sets simply rendered. A script drawing over a running monitor therefore needs its own
