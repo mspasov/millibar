@@ -66,6 +66,12 @@ for the https://api.busy.app route — create it with the "BUSY Bar" scope, an
 Account-scope token 403s); --password is the device's HTTP Access Password if
 one is configured.
 
+Device storage (mbar api):
+
+  mbar api <cmd>         browse and manage the device's /ext partition and
+                         per-app assets: ls, df, cat, get, put, mv, mkdir,
+                         rm, apps, push, wipe — 'mbar api help' for details
+
 Environment:
 
   BUSY_BAR_ADDR          bypass the route config — exact address, unprobed

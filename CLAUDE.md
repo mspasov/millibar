@@ -147,7 +147,7 @@ Full detail in DEVICE.md; these are the ones that bite hardest.
 - `src/` is anything you can import, `tools/` anything you only run, `docs/` anything you
   only read; `tools/` may import `../src`, never the reverse. Moves use `git mv`, and a
   refactor re-points DEVICE.md's `src/*.ts` references.
-- New capability goes into `mbar`/`bbar` as a subcommand, not a separate tool (the user
+- New capability goes into `mbar` as a subcommand, not a separate tool (the user
   has said so twice). New views are added alongside existing ones — a separate screen or
   module — never by replacing what's there. Vocabulary: *module* = what the dial
   switches, *screen* = what the encoder cycles, *window* = a rate-limit period.

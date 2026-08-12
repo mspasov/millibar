@@ -140,7 +140,7 @@ describe('stat', () => {
 describe('full-URL BUSY_BAR_ADDR', () => {
   test('a scheme-carrying addr reaches the server instead of becoming http://http://…', async () => {
     // Real fetch against a local echo server — the regression this guards
-    // broke every bbar command whenever BUSY_BAR_ADDR was a full URL.
+    // broke every `mbar api` command whenever BUSY_BAR_ADDR was a full URL.
     const status = { used_bytes: 1024, free_bytes: 2048, total_bytes: 3072 };
     const server = Bun.serve({
       port: 0,

@@ -9,11 +9,11 @@
  * The moving parts live elsewhere: src/host.ts runs the modules and owns the
  * device, src/module.ts defines what a module is, src/modules/* are the
  * modules themselves, src/device-cli.ts implements the connection
- * subcommands. Adding a monitor means writing one module file and
- * registering it here.
+ * subcommands, src/api-cli.ts the storage/api subcommands. Adding a
+ * monitor means writing one module file and registering it here.
  *
  * Usage: mbar [--route <names>] [--modules <names>] [--[no-]animations]
- *        [--help | probe | routes | show | init | set | rm | order]
+ *        [--help | api <cmd> | probe | routes | show | init | set | rm | order]
  *        (after `bun link`), or bun run src/mbar.ts — no arguments runs
  *        the monitor with every module
  * Env:   BUSY_BAR_ADDR, BUSY_BAR_ROUTE, BUSY_BAR_TOKEN, BUSY_BAR_PASSWORD,
@@ -25,6 +25,7 @@
  *        ANIMATIONS (off disables the sweeps, the history intros, and
  *        the quit prompt's drain and turn-off farewell)
  */
+import { apiUsage, isApiCommand, runApiCommand } from './api-cli';
 import { envFlag, envNumber } from './config';
 import { isDeviceCommand, mbarUsage, runDeviceCommand } from './device-cli';
 import { runHost } from './host';
@@ -79,6 +80,18 @@ const [command, ...args] = argv;
 if (command === '--help' || command === '-h' || command === 'help') {
   console.log(mbarUsage());
   process.exit(0);
+}
+if (command === 'api') {
+  const [sub, ...subArgs] = args;
+  if (sub === undefined || sub === 'help' || sub === '--help' || sub === '-h') {
+    console.log(apiUsage());
+    process.exit(0);
+  }
+  if (!isApiCommand(sub)) {
+    console.error(`unknown api command '${sub}'\n\n${apiUsage()}`);
+    process.exit(1);
+  }
+  process.exit(await runApiCommand(sub, subArgs));
 }
 if (command !== undefined) {
   if (!isDeviceCommand(command)) {

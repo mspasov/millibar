@@ -1,7 +1,7 @@
 /**
  * Client for the BUSY Bar storage (`/api/storage/*`) and assets
  * (`/api/assets/upload`) HTTP APIs, plus the pure path/size helpers the
- * bbar CLI is built from.
+ * `mbar api` CLI (src/api-cli.ts) is built from.
  *
  * Device behaviours this module has to encode (verified on firmware 1.1.1,
  * documented in DEVICE.md):

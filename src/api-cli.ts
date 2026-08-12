@@ -1,10 +1,13 @@
-#!/usr/bin/env bun
 /**
- * bbar — browse and manage the BUSY Bar's /ext storage partition and
- * per-app assets over HTTP. `bun link` installs it globally.
+ * The `mbar api` subcommands — the management face of the device's HTTP
+ * API, today the /ext storage partition and per-app assets (src/store.ts
+ * is the client). Kept out of mbar.ts so the entry point stays a thin argv
+ * switch and the handlers stay testable (they return exit codes rather
+ * than calling process.exit). The group is named `api`, not `storage`,
+ * deliberately: room for more device endpoints under it later.
  *
- * Paths may omit the /ext prefix: `bbar ls user_assets` and
- * `bbar ls /ext/user_assets` are the same. Safety: the device's remove
+ * Paths may omit the /ext prefix: `mbar api ls user_assets` and
+ * `mbar api ls /ext/user_assets` are the same. Safety: the device's remove
  * endpoint recursively deletes non-empty directories and reports success
  * for nonexistent paths (see DEVICE.md), so `rm` stats first, demands -r
  * for directories, and demands --force outside /ext/user_assets.
@@ -30,24 +33,34 @@ import {
   walk,
   write,
   type StorageEntry,
-} from '../src/store';
+} from './store';
 
-const USAGE = `bbar — BUSY Bar CLI (routes from ~/.config/mbar/config.json; BUSY_BAR_ADDR overrides)
+export const API_COMMANDS = ['ls', 'df', 'cat', 'get', 'put', 'mv', 'mkdir', 'rm', 'apps', 'push', 'wipe'] as const;
+export type ApiCommand = (typeof API_COMMANDS)[number];
 
-Storage & assets:
+export function isApiCommand(command: string): command is ApiCommand {
+  return (API_COMMANDS as readonly string[]).includes(command);
+}
 
-  bbar ls [path] [-R] [--json]     list a directory (default /ext); -R recurses
-  bbar df [--json]                 storage usage
-  bbar cat <path>                  file contents to stdout (raw bytes)
-  bbar get <path> [local]          download a file (default: its basename)
-  bbar put <local|-> <path>        upload a file ('-' reads stdin)
-  bbar mv <old> <new> [--force]    rename/move; --force to overwrite the target
-  bbar mkdir <path>                create a directory (parents included)
-  bbar rm <path> [-r] [--force]    delete; -r for directories (recursive!),
-                                     --force outside /ext/user_assets
-  bbar apps [--json]               per-app asset usage under /ext/user_assets
-  bbar push <app> <files...>       upload files as an app's assets
-  bbar wipe <app>                  delete an app's entire asset directory`;
+export function apiUsage(): string {
+  return `mbar api — the BUSY Bar's /ext storage partition and per-app assets
+
+  mbar api ls [path] [-R] [--json]     list a directory (default /ext); -R recurses
+  mbar api df [--json]                 storage usage
+  mbar api cat <path>                  file contents to stdout (raw bytes)
+  mbar api get <path> [local]          download a file (default: its basename)
+  mbar api put <local|-> <path>        upload a file ('-' reads stdin)
+  mbar api mv <old> <new> [--force]    rename/move; --force to overwrite the target
+  mbar api mkdir <path>                create a directory (parents included)
+  mbar api rm <path> [-r] [--force]    delete; -r for directories (recursive!),
+                                         --force outside /ext/user_assets
+  mbar api apps [--json]               per-app asset usage under /ext/user_assets
+  mbar api push <app> <files...>       upload files as an app's assets
+  mbar api wipe <app>                  delete an app's entire asset directory
+
+Paths may omit the /ext prefix ('mbar api ls user_assets'). Routes,
+credentials, and --route work as for every mbar command — see 'mbar help'.`;
+}
 
 interface Flags {
   recursive: boolean;
@@ -282,62 +295,62 @@ async function cmdWipe(app: string): Promise<void> {
 
 function expect(positional: string[], min: number, max: number, usage: string): void {
   if (positional.length < min || positional.length > max) {
-    throw new StorageError(`usage: bbar ${usage}`);
+    throw new StorageError(`usage: mbar api ${usage}`);
   }
 }
 
-async function main(): Promise<void> {
-  const [command, ...rest] = process.argv.slice(2);
-  const { positional, flags } = parseArgs(rest);
-  switch (command) {
-    case 'ls':
-      expect(positional, 0, 1, 'ls [path] [-R] [--json]');
-      return cmdLs(positional[0], flags);
-    case 'df':
-      expect(positional, 0, 0, 'df [--json]');
-      return cmdDf(flags);
-    case 'cat':
-      expect(positional, 1, 1, 'cat <path>');
-      return cmdCat(positional[0]!);
-    case 'get':
-      expect(positional, 1, 2, 'get <path> [local]');
-      return cmdGet(positional[0]!, positional[1]);
-    case 'put':
-      expect(positional, 2, 2, 'put <local|-> <path>');
-      return cmdPut(positional[0]!, positional[1]!);
-    case 'mv':
-      expect(positional, 2, 2, 'mv <old> <new> [--force]');
-      return cmdMv(positional[0]!, positional[1]!, flags);
-    case 'mkdir':
-      expect(positional, 1, 1, 'mkdir <path>');
-      return cmdMkdir(positional[0]!);
-    case 'rm':
-      expect(positional, 1, 1, 'rm <path> [-r] [--force]');
-      return cmdRm(positional[0]!, flags);
-    case 'apps':
-      expect(positional, 0, 0, 'apps [--json]');
-      return cmdApps(flags);
-    case 'push':
-      expect(positional, 2, Infinity, 'push <app> <files...>');
-      return cmdPush(positional[0]!, positional.slice(1));
-    case 'wipe':
-      expect(positional, 1, 1, 'wipe <app>');
-      return cmdWipe(positional[0]!);
-    case undefined:
-    case 'help':
-    case '--help':
-      console.log(USAGE);
-      process.exitCode = command === undefined ? 2 : 0;
-      return;
-    default:
-      console.error(`unknown command: ${command}\n\n${USAGE}`);
-      process.exitCode = 2;
+export async function runApiCommand(command: ApiCommand, args: string[]): Promise<number> {
+  try {
+    // Inside the try so an unknown-flag throw reports like any other error.
+    const { positional, flags } = parseArgs(args);
+    switch (command) {
+      case 'ls':
+        expect(positional, 0, 1, 'ls [path] [-R] [--json]');
+        await cmdLs(positional[0], flags);
+        return 0;
+      case 'df':
+        expect(positional, 0, 0, 'df [--json]');
+        await cmdDf(flags);
+        return 0;
+      case 'cat':
+        expect(positional, 1, 1, 'cat <path>');
+        await cmdCat(positional[0]!);
+        return 0;
+      case 'get':
+        expect(positional, 1, 2, 'get <path> [local]');
+        await cmdGet(positional[0]!, positional[1]);
+        return 0;
+      case 'put':
+        expect(positional, 2, 2, 'put <local|-> <path>');
+        await cmdPut(positional[0]!, positional[1]!);
+        return 0;
+      case 'mv':
+        expect(positional, 2, 2, 'mv <old> <new> [--force]');
+        await cmdMv(positional[0]!, positional[1]!, flags);
+        return 0;
+      case 'mkdir':
+        expect(positional, 1, 1, 'mkdir <path>');
+        await cmdMkdir(positional[0]!);
+        return 0;
+      case 'rm':
+        expect(positional, 1, 1, 'rm <path> [-r] [--force]');
+        await cmdRm(positional[0]!, flags);
+        return 0;
+      case 'apps':
+        expect(positional, 0, 0, 'apps [--json]');
+        await cmdApps(flags);
+        return 0;
+      case 'push':
+        expect(positional, 2, Infinity, 'push <app> <files...>');
+        await cmdPush(positional[0]!, positional.slice(1));
+        return 0;
+      case 'wipe':
+        expect(positional, 1, 1, 'wipe <app>');
+        await cmdWipe(positional[0]!);
+        return 0;
+    }
+  } catch (error) {
+    console.error((error as Error).message);
+    return 1;
   }
-}
-
-if (import.meta.main) {
-  main().catch((error: Error) => {
-    console.error(error.message);
-    process.exit(1);
-  });
 }

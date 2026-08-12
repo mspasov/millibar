@@ -631,13 +631,13 @@ every rotary-encoder event (`--once` for a single test click).
 A real filesystem API over the ~7 GB `/ext` partition (`write`, `read`, `list`,
 `remove`, `mkdir`, `rename`, `status`). Every endpoint takes the path as a query
 param matching `^/ext(/[a-zA-Z0-9._\-]*)*$` — no spaces, and note `.`/`..` *do*
-match, so validate them yourself. `bbar` (tools/bbar.ts) wraps all of this;
+match, so validate them yourself. `mbar api` (src/api-cli.ts) wraps all of this;
 `src/store.ts` is the client. Probed on firmware 1.1.1 (2026-08-07):
 
 - **`remove` is recursive and never says no.** It deletes a non-empty directory
   tree in one call, and returns `200 {"result":"OK"}` for paths that *don't
   exist*. There is no rmdir-style safety and no "not found" signal — stat first
-  (by listing the parent) if you need either. This is why `bbar rm` requires
+  (by listing the parent) if you need either. This is why `mbar api rm` requires
   `-r` for directories and `--force` outside `/ext/user_assets`.
 - **`write` auto-creates exactly one missing directory level** (the immediate
   parent). A target two levels deep fails `508 {"error":"Failed to open file for
@@ -655,8 +655,8 @@ match, so validate them yourself. `bbar` (tools/bbar.ts) wraps all of this;
 Layout worth knowing: `/ext/user_assets/<application_name>/` is where
 `POST /api/assets/upload` writes; `/ext/apps_assets/shared/{animations,sounds}/`
 holds the stock assets that `stock_path` resolves against. Uploaded assets
-persist forever — nothing cleans up after a deleted script, so `bbar apps` /
-`bbar wipe <app>` exist. `DELETE /api/assets/upload?application_name=…`
+persist forever — nothing cleans up after a deleted script, so `mbar api apps` /
+`mbar api wipe <app>` exist. `DELETE /api/assets/upload?application_name=…`
 removes the app's asset *directory itself*, not just its contents. The same
 applies to renames: a module that renames its uploaded asset orphans the old
 file — delete it in the same change (an orphaned `mbar-stats.anim` sat on the
@@ -683,8 +683,8 @@ device for days after the history module's rename).
 11. (2026-08-07) Probed every `/api/storage/*` endpoint under a throwaway
     `/ext/user_assets/cli_test*` tree — recursive remove, remove-on-missing → 200,
     write's one-level dir creation, rename overwrite — then exercised the full
-    `bbar` CLI (transfers, guards, push/wipe) against the device and left the
-    tree clean. ✅
+    `bbar` CLI (now `mbar api`; transfers, guards, push/wipe) against the device
+    and left the tree clean. ✅
 
 ## Where the app-level docs live
 

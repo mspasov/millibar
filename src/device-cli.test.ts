@@ -144,6 +144,7 @@ describe('mbar entry point', () => {
     expect(result.exitCode).toBe(0);
     const out = result.stdout.toString();
     expect(out).toContain('mbar probe');
+    expect(out).toContain('mbar api');
     expect(out).toContain('BUSY_BAR_ADDR');
     expect(out).toContain('BUSY_BAR_ROUTE');
   });

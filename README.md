@@ -54,7 +54,7 @@ instantaneous CPU%.
 ```sh
 bun install
 bun run tools/smoke.ts        # connectivity smoke test
-bun link                # installs the global `mbar` and `bbar` commands (~/.bun/bin)
+bun link                # installs the global `mbar` command (~/.bun/bin)
 ```
 
 The smoke test should print your device's model, firmware, battery, and timer state. If
@@ -78,7 +78,7 @@ it hangs or errors, see [Troubleshooting](#troubleshooting).
 | `bun run tools/screenshot.ts [out.png] [front\|back] [scale]` | Captures a display to PNG. |
 | `bun run tools/readme-shots.ts generate\|validate [--fw <path>]` | Regenerates the README's screen mockups — the modules' real `render()` on showcase data, rasterized with the firmware's fonts (a `busybar-firmware` checkout supplies them), no device needed. `validate` diffs the rasterizer against a real capture. |
 | `mbar probe\|routes\|show\|init\|set\|rm\|order` | **Connection config.** Manages the persistent route list (USB / LAN / cloud, with credentials) and probes which route answers. `--route <names>` forces a run onto specific routes. See [Connecting](#connecting-to-the-device). |
-| `bbar` (or `bun run tools/bbar.ts`) | **Storage CLI.** Browse and manage the device's 7 GB `/ext` partition and per-app assets: `ls`/`df`/`cat`/`get`/`put`/`mv`/`mkdir`/`rm`, plus `apps`/`push`/`wipe` for asset directories. `bbar help` for the full list. |
+| `mbar api <cmd>` | **Storage CLI.** Browse and manage the device's 7 GB `/ext` partition and per-app assets: `ls`/`df`/`cat`/`get`/`put`/`mv`/`mkdir`/`rm`, plus `apps`/`push`/`wipe` for asset directories. `mbar api help` for the full list. |
 
 ## Connecting to the device
 

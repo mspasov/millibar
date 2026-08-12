@@ -2,8 +2,7 @@
   "name": "millibar",
   "license": "MIT",
   "bin": {
-    "mbar": "./src/mbar.ts",
-    "bbar": "./tools/bbar.ts"
+    "mbar": "./src/mbar.ts"
   },
   "scripts": {
     "test": "bun test",
