@@ -337,6 +337,7 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
       // A second signal while the farewell/clear is in flight means "now":
       // skip the remaining niceties. Anything left on screen self-expires via
       // the element timeout. No argument, so a fatal path's exitCode survives.
+      detachSignals();
       exit();
       return;
     }
@@ -358,12 +359,22 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
       // re-register the application on the device.
       await ledChain.catch(() => {});
       await session.clear().catch(() => {});
+      detachSignals();
       exit(0);
     })();
   }
 
+  // Named so they can be detached: the CLI's process.exit hides a leak, but
+  // an embedder-injected `exit` returns — a second runHost would then stack
+  // handlers, and one Ctrl-C would run every shutdown ever registered.
+  // Detached before every exit() call, never earlier: until the moment of
+  // exit, a second signal must still mean "now".
+  const onSignal = () => shutdown();
+  const detachSignals = () => {
+    for (const signal of ['SIGINT', 'SIGTERM'] as const) process.off(signal, onSignal);
+  };
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-    process.on(signal, () => shutdown());
+    process.on(signal, onSignal);
   }
   if (options.signal?.aborted) shutdown();
   else options.signal?.addEventListener('abort', () => shutdown(), { once: true });
@@ -381,15 +392,21 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
     ]);
   } catch (error) {
     // A module poll() throw is fatal by contract (e.g. NoCredentialsError):
-    // stop everything, leave the display clean, and exit non-zero. As on
-    // SIGINT, the LED chain drains before the clear. A signal arriving during
-    // this cleanup exits (keeping exitCode 1) rather than replaying it.
+    // stop everything, leave the display clean, and exit non-zero — through
+    // `exit`, so an embedder awaiting its callback learns about the death
+    // too (returning with only process.exitCode set left them hanging, with
+    // the signal handlers still attached). exitCode is still set first: a
+    // signal arriving mid-cleanup takes the no-argument exit() path, which
+    // must not turn the failure into a 0. As on SIGINT, the LED chain
+    // drains before the clear.
     exiting = true;
     controller.abort();
     const expected = error instanceof Error && !BUILTIN_ERROR_NAMES.has(error.name);
     logError('host', expected ? (error as Error).message : ((error as Error)?.stack ?? String(error)));
+    process.exitCode = 1;
     await ledChain.catch(() => {});
     await session.clear().catch(() => {});
-    process.exitCode = 1;
+    detachSignals();
+    exit(1);
   }
 }

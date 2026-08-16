@@ -94,24 +94,78 @@ describe('runHost shutdown', () => {
   });
 
   test('a second interrupt exits immediately instead of replaying the shutdown', async () => {
-    const { events, exits, session, exit } = harness();
+    // The second interrupt is delivered while the first shutdown is provably
+    // still in flight (the clear is blocked), because that is the only time
+    // the host's own handler is attached. After the run the handlers must be
+    // gone — a kill then would reach Bun's default handler and abort the
+    // whole test process, which is exactly the leak this guards against.
+    const events: string[] = [];
+    const exits: (number | undefined)[] = [];
+    let releaseClear: (() => void) | null = null;
+    const session = new DisplaySession({
+      applicationName: 'test_host',
+      priority: 50,
+      timeoutS: 90,
+      send: async (body: DisplayDrawParams) => {
+        events.push(`draw:${body.elements.map((el) => el.id).join(',')}`);
+      },
+      clear: async () => {
+        events.push('clear');
+        await new Promise<void>((resolve) => { releaseClear = resolve; });
+      },
+    });
     const idle: MonitorModule = {
       id: 'idle',
       title: 'Idle',
       poll: async () => ({ nextPollMs: 60_000, holdRefreshMs: 0 }),
       render: () => [textEl('x')],
     };
-    const run = runHost([idle], { session, exit, animations: false, heartbeatMs: 60_000 });
+    const baseline = process.listenerCount('SIGINT');
+    const stop = new AbortController();
+    const run = runHost([idle], {
+      session, exit: (code) => { exits.push(code); }, signal: stop.signal,
+      animations: false, heartbeatMs: 60_000,
+    });
 
     await until(() => events.length > 0, 'the first paint');
-    process.kill(process.pid, 'SIGINT');
-    await run;
-    expect(exits).toEqual([0]);
+    expect(process.listenerCount('SIGINT')).toBe(baseline + 1);
+    stop.abort(); // first quit — parks in the blocked clear
+    await until(() => releaseClear !== null, 'the shutdown clear to start');
 
     process.kill(process.pid, 'SIGINT');
-    await until(() => exits.length === 2, 'the force exit');
+    await until(() => exits.length === 1, 'the force exit');
     // No second farewell/clear pass — just the exit, exitCode untouched.
-    expect(exits[1]).toBeUndefined();
+    expect(exits[0]).toBeUndefined();
+
+    releaseClear!();
+    await run;
+    // The interrupted shutdown still completes its ordinary exit…
+    expect(exits).toEqual([undefined, 0]);
     expect(events.filter((e) => e === 'clear')).toHaveLength(1);
+    // …and leaves nothing attached to the process.
+    expect(process.listenerCount('SIGINT')).toBe(baseline);
+  });
+
+  test('a fatal poll error exits 1 through the injected exit, display cleared', async () => {
+    // Setting process.exitCode and returning left an embedder awaiting the
+    // exit callback hanging forever, with the signal handlers still attached.
+    const { events, exits, session, exit } = harness();
+    const fatal: MonitorModule = {
+      id: 'fatal',
+      title: 'Fatal',
+      poll: async () => {
+        throw Object.assign(new Error('no credentials'), { name: 'NoCredentialsError' });
+      },
+      render: () => [textEl('x')],
+    };
+    const baseline = process.listenerCount('SIGINT');
+    const savedExitCode = process.exitCode;
+    await runHost([fatal], { session, exit, animations: false, heartbeatMs: 60_000 });
+    expect(exits).toEqual([1]);
+    expect(events[events.length - 1]).toBe('clear');
+    expect(process.listenerCount('SIGINT')).toBe(baseline);
+    // The host also sets process.exitCode (so a mid-cleanup signal's bare
+    // exit() keeps the failure); undo that here or the test runner inherits it.
+    process.exitCode = savedExitCode;
   });
 });
