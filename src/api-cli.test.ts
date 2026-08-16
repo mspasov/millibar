@@ -68,8 +68,14 @@ async function run(command: ApiCommand, args: string[]): Promise<{ code: number;
 }
 
 describe('usage errors (fail before any device contact)', () => {
-  // No MBAR_ADDR is set in any of these: passing means expect()/parseArgs
-  // threw before a handler could reach the network.
+  // MBAR_ADDR points at a dead port so these fail *closed*: a handler that
+  // slipped past expect()/parseArgs would otherwise load DEFAULT_ROUTES and
+  // probe the real shared device. Passing still means the error came from
+  // validation — a dead port yields 'unreachable', not a usage line.
+  beforeEach(() => {
+    process.env.MBAR_ADDR = '127.0.0.1:9';
+  });
+
   test('missing arguments exit 1 with a `usage: mbar api` line', async () => {
     for (const [cmd, args] of [
       ['cat', []],
@@ -161,10 +167,13 @@ describe('mbar api entry point', () => {
 
   test('--route flows through the stripper to api commands', () => {
     // stripper → api dispatch → connection layer, end-to-end, no hardware: a
-    // bogus forced route must surface as the connection error.
+    // bogus forced route must surface as the connection error. MBAR_ADDR is
+    // pinned empty because the child re-loads .env (bun run) and a value
+    // there would beat --route and aim the command at a real device; an
+    // explicitly passed var — even empty — wins over .env in Bun.
     const result = Bun.spawnSync(['bun', 'run', 'src/mbar.ts', 'api', 'df', '--route', 'nope'], {
       cwd: repoRoot,
-      env: { ...process.env, MBAR_CONFIG: join(tempDir(), 'config.json') },
+      env: { ...process.env, MBAR_CONFIG: join(tempDir(), 'config.json'), MBAR_ADDR: '' },
     });
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString()).toContain("no route named 'nope'");

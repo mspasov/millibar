@@ -162,16 +162,20 @@ describe('mbar entry point', () => {
   test('--route reaches route selection from any argv position', () => {
     // End-to-end through the flag-stripping in mbar.ts: a bogus forced name
     // must surface as the connection error, not as an unknown command.
+    // MBAR_ADDR is pinned empty because the child re-loads .env (bun run)
+    // and a value there would beat --route and probe a real device; an
+    // explicitly passed var — even empty — wins over .env in Bun.
+    const spawnEnv = { ...process.env, MBAR_CONFIG: join(tempDir(), 'config.json'), MBAR_ADDR: '' };
     const result = Bun.spawnSync(['bun', 'run', 'src/mbar.ts', 'probe', '--route', 'nope'], {
       cwd: repoRoot,
-      env: { ...process.env, MBAR_CONFIG: join(tempDir(), 'config.json') },
+      env: spawnEnv,
     });
     expect(result.exitCode).toBe(1);
     expect(result.stderr.toString()).toContain("no route named 'nope'");
 
     const eq = Bun.spawnSync(['bun', 'run', 'src/mbar.ts', '--route=nope', 'probe'], {
       cwd: repoRoot,
-      env: { ...process.env, MBAR_CONFIG: join(tempDir(), 'config.json') },
+      env: spawnEnv,
     });
     expect(eq.exitCode).toBe(1);
     expect(eq.stderr.toString()).toContain("no route named 'nope'");
