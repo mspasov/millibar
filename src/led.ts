@@ -52,6 +52,14 @@ export interface PulseOptions extends TransportOptions {
  * module.ts and host.ts don't each hand-write the same literal. */
 export type PulseShape = Pick<PulseOptions, 'durationMs' | 'cycles'>;
 
+/** Abort reason that also skips the mandatory light-off cleanup frame. That
+ * frame is itself a display draw, so a host pausing all drawing (selector
+ * switch away from OFF: the system menus own the screen) must be able to end
+ * a pulse without one last draw landing on top of them — the notification
+ * preset stops blinking on its own within ~3 s. Every other abort keeps the
+ * cleanup: an interrupted pulse must not leave the light lit. */
+export const SKIP_OFF_FRAME = 'skip-led-off-frame';
+
 export interface FadeOptions extends TransportOptions {
   /** Two or more stops to travel through, in order. */
   colors: string[];
@@ -253,7 +261,7 @@ export async function pulseLed(options: PulseOptions = {}): Promise<void> {
   // A pulse aborted before its first frame lit nothing and sends nothing: its
   // late cleanup draw would land after the host's shutdown display clear and
   // re-register the application on the device.
-  if (ran > 0) await send('#000000FF');
+  if (ran > 0 && options.signal?.reason !== SKIP_OFF_FRAME) await send('#000000FF');
 }
 
 /**
@@ -305,8 +313,9 @@ export async function fadeLed(options: FadeOptions): Promise<void> {
     });
   }
 
-  // Same rule as pulseLed: nothing lit means nothing to put out.
-  if (ran > 0) await send('#000000FF');
+  // Same rules as pulseLed: nothing lit means nothing to put out, and a
+  // SKIP_OFF_FRAME abort must not draw.
+  if (ran > 0 && options.signal?.reason !== SKIP_OFF_FRAME) await send('#000000FF');
 }
 
 if (import.meta.main) {

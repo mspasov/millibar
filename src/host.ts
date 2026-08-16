@@ -15,7 +15,7 @@ import { DEFAULT_APP_NAME, envNumber } from './config';
 import { describeConnection, resolveConnection } from './connection';
 import { DisplaySession, type DrawElement } from './display';
 import { listenInput, type Button, type InputEvent } from './input';
-import { pulseLed, type PulseShape } from './led';
+import { pulseLed, SKIP_OFF_FRAME, type PulseShape } from './led';
 import { log, logError, logResolved } from './log';
 import { ModuleRunner, wrapIndex, type MonitorModule } from './module';
 import { BACK_SETTLE_MS, QuitConfirm, TURN_OFF_HOLD_MS, ensureTurnOffAsset, turnOffElement } from './quit-confirm';
@@ -236,9 +236,18 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
       if (event.position !== 'OFF') {
         if (!switchedAway) log('host', `switch -> ${event.position}: system screen up, drawing paused until OFF`);
         switchedAway = true;
-        // A mid-flight pulse would keep posting draw frames under the menu.
-        ledAbort?.abort();
+        // A mid-flight pulse would keep posting draw frames under the menu —
+        // and its mandatory light-off frame is itself a draw, so that must be
+        // skipped too; the preset stops blinking on its own within ~3 s.
+        ledAbort?.abort(SKIP_OFF_FRAME);
         quit.disarm();
+        // Release the display: the gates above only stop *future* draws, but
+        // a queued or in-flight frame (near-certain during a 33 ms sweep)
+        // still lands after this event, and one priority-50 draw covers the
+        // priority-10 menu with the whole persisted element set until the
+        // ~90 s element timeout. clear() drops the waiting frame and chains
+        // the delete behind anything in flight, so the last word is ours.
+        void session.clear().catch((e) => logError('draw', (e as Error).message));
       } else if (switchedAway) {
         log('host', 'switch -> OFF: resuming once the power-down finishes');
         switchResume = setTimeout(() => {
