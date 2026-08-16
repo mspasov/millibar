@@ -158,6 +158,22 @@ describe('fetchGrokUsage', () => {
     expect(requests).toHaveLength(0);
   });
 
+  test('a leftover empty, keyless, or non-object auth.json is not credentials', async () => {
+    // hasGrokCredentials must match the fetch path's predicate: a file that
+    // exists but yields no session would pass an existsSync check, join the
+    // default roster, and then die fatally on the first poll — the exact
+    // failure the roster filter exists to prevent.
+    for (const auth of [{}, { 'https://auth.x.ai::c1': session({ key: '' }) }, 'junk']) {
+      arrange(auth, () => Response.json(weeklyBody()));
+      expect(hasGrokCredentials()).toBe(false);
+      await expect(fetchGrokUsage()).rejects.toBeInstanceOf(NoGrokCredentialsError);
+    }
+    // An expired session still counts: that failure is GrokAuthError, which
+    // the poller survives (stale-dim), so the module belongs in the roster.
+    arrange({ 'https://auth.x.ai::c1': session({ expires_at: DEAD }) }, () => Response.json(weeklyBody()));
+    expect(hasGrokCredentials()).toBe(true);
+  });
+
   test('an expired token errors with the login hint instead of spending a 401', async () => {
     arrange({ 'https://auth.x.ai::c1': session({ expires_at: DEAD }) }, () => Response.json(weeklyBody()));
     await expect(fetchGrokUsage()).rejects.toBeInstanceOf(GrokAuthError);

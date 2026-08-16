@@ -12,7 +12,7 @@
  * never written into our cache, never passed as an argv where `ps` could read
  * it — the same rules as the Claude token (docs/USAGE-API.md).
  */
-import { existsSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import { readFileSync, renameSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { RateLimitError } from './usage';
@@ -59,9 +59,14 @@ export function grokAuthPath(): string {
 }
 
 /** Whether a `grok login` has ever happened here — mbar uses this to leave
- * the Grok module out of the default roster rather than die on first poll. */
+ * the Grok module out of the default roster rather than die on first poll.
+ * Same predicate as the fetch path, not a bare existsSync: a leftover empty,
+ * `{}`, or keyless auth.json is "present" but yields no session, and the
+ * resulting NoGrokCredentialsError is exactly the fatal first poll this
+ * check exists to prevent. An expired-but-usable session still counts —
+ * that failure mode is GrokAuthError, which the poller survives. */
 export function hasGrokCredentials(): boolean {
-  return existsSync(grokAuthPath());
+  return readGrokCredentials() !== null;
 }
 
 interface GrokCredentials {
