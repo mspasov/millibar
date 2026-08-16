@@ -1,9 +1,10 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import type { DisplayDrawParams } from '@busy-app/busy-lib';
 import {
   COLORS,
   DisplaySession,
   HIDDEN,
+  displayDraw,
   formatResetCompact,
   mixRgb,
   progressBar,
@@ -12,6 +13,37 @@ import {
   textWidth,
   type DrawElement,
 } from './display';
+import { restoreFetch, stubFetch } from './test-util';
+
+describe('displayDraw', () => {
+  afterEach(restoreFetch);
+
+  test('the body on the wire carries exactly what was passed — LED colour included', async () => {
+    // The reason displayDraw exists at all: busy-lib's DisplayDraw accepts
+    // led_notification_color in its params type, then rebuilds the body
+    // from only {application_name, priority, elements} — it type-checked,
+    // returned 200, and the light never came on. This is the wire-level
+    // assertion that a regression back to the library path cannot pass.
+    const calls = stubFetch();
+    const body: DisplayDrawParams = {
+      application_name: 'test_app',
+      priority: 51,
+      led_notification_color: '#00CCFFFF',
+      elements: [
+        {
+          id: 'x', type: 'rectangle', x: 0, y: 0, width: 1, height: 1, radius: 0,
+          fill: 'solid', fill_colors: ['#FFFFFFFF'], border_width: 0,
+          border_color: '#FFFFFFFF', display: 'front',
+        },
+      ],
+    };
+    await displayDraw(body);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.url.pathname).toBe('/api/display/draw');
+    expect(calls[0]!.method).toBe('POST');
+    expect(JSON.parse(String(calls[0]!.body))).toEqual(body);
+  });
+});
 
 describe('severityColor', () => {
   test('green below 50, amber from 50, red from 80', () => {
