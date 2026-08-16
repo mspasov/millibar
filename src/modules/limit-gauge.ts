@@ -88,12 +88,15 @@ export function limitGaugeModule<D>(spec: LimitGaugeSpec<D>, options: LimitModul
 
   /** Point the sweep at the current screen's value; staleness rides the colour,
    * so going stale fades to grey in place instead of snapping. The first poll
-   * sweeps up from 0 — the startup reveal. */
+   * sweeps up from 0 — the startup reveal. The stale grey is staleBar, not
+   * `stale`: the sweep colour paints the bar row, where everything must clear
+   * the ladder in COLORS — `stale` sits 21/255 from the pace tick, under the
+   * panel's ~24/255 legibility floor (the dash learned this first). */
   const retarget = (): void => {
     const screen = currentScreen();
     if (!screen) return;
     const pct = Math.max(0, Math.min(100, screen.window.utilization));
-    sweep.to(pct, poller.stale ? COLORS.stale : severityColor(pct));
+    sweep.to(pct, poller.stale ? COLORS.staleBar : severityColor(pct));
   };
 
   return {
@@ -155,7 +158,11 @@ export function limitGaugeModule<D>(spec: LimitGaugeSpec<D>, options: LimitModul
           type: 'text',
           text: `${Math.round(pct)}%`,
           font: 'normal',
-          color,
+          // Text wears the text grey while stale; the sweep's staleBar
+          // belongs to the bar row only (`stale` is off the row's ladder,
+          // staleBar is brighter than the label's grey). The number snaps to
+          // its grey while the bar fades — staleness onset is a quiet event.
+          color: poller.stale ? COLORS.stale : color,
           align: 'mid_right',
           x: WIDTH - 2,
           y: 5,

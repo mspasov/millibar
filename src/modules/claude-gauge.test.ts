@@ -330,10 +330,14 @@ describe('render', () => {
       return usageFixture({ fiveHour: { utilization: 70, resetsAt: null } });
     }, { cachePath: path });
 
-    // Before any poll: cached values render, marked stale.
+    // Before any poll: cached values render, marked stale. Text greys to
+    // `stale`; the bar fill greys to `staleBar` — on the bar row everything
+    // must clear the ladder in COLORS, and `stale` sits under the panel's
+    // legibility floor next to the pace tick.
     const prePoll = module.render({ refreshing: false }) as Array<Record<string, unknown>>;
     expect(prePoll[0]).toMatchObject({ text: '5H?', color: COLORS.stale });
     expect(prePoll[2]).toMatchObject({ text: '62%', color: COLORS.stale });
+    expect(prePoll[4]).toMatchObject({ id: 'fill', fill_colors: [COLORS.staleBar] });
 
     await module.poll(); // fails — cached values stay up
     expect((module.render({ refreshing: false })[0] as { text: string }).text).toBe('5H?');
