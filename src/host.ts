@@ -73,7 +73,9 @@ function envSwitchButton(): Button | undefined {
 export async function runHost(modules: MonitorModule[], options: HostOptions = {}): Promise<void> {
   if (modules.length === 0) throw new Error('runHost needs at least one module');
   const applicationName = options.applicationName ?? DEFAULT_APP_NAME;
-  const priority = options.priority ?? envNumber('MBAR_PRIORITY', 50, 1);
+  // 1–100 is the device's whole priority range (DEVICE.md); past it the
+  // draw's behaviour on the wire is undefined, so fail loudly here.
+  const priority = options.priority ?? envNumber('MBAR_PRIORITY', 50, 1, 100);
   const heartbeatMs = options.heartbeatMs ?? 60_000;
   const switchButton = options.switchButton ?? envSwitchButton() ?? 'OK';
 

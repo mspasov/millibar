@@ -75,14 +75,15 @@ export function envFlag(name: string, fallback: boolean): boolean {
 }
 
 /** Numeric env var, or `fallback` when unset/empty. Throws on anything
- * non-numeric or below `min` instead of letting NaN or a hot-loop-inducing
- * zero through. */
-export function envNumber(name: string, fallback: number, min = 0): number {
+ * non-numeric or outside [min, max] instead of letting NaN, a hot-loop-
+ * inducing zero, or an out-of-range value the device would reject through. */
+export function envNumber(name: string, fallback: number, min = 0, max = Infinity): number {
   const raw = process.env[name];
   if (raw === undefined || raw === '') return fallback;
   const value = Number(raw);
-  if (!Number.isFinite(value) || value < min) {
-    throw new Error(`${name} must be a number >= ${min}, got '${raw}'`);
+  if (!Number.isFinite(value) || value < min || value > max) {
+    const range = max === Infinity ? `>= ${min}` : `between ${min} and ${max}`;
+    throw new Error(`${name} must be a number ${range}, got '${raw}'`);
   }
   return value;
 }

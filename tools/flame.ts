@@ -53,7 +53,7 @@ const PHASE_LEAD = 3;
 
 const APP_NAME = 'claude_flame';
 const FILE_NAME = 'flame.anim';
-const PRIORITY = envNumber('MBAR_PRIORITY', 50, 1);
+const PRIORITY = envNumber('MBAR_PRIORITY', 50, 1, 100);
 
 /** Redraws refresh this; the display self-clears if the process dies. */
 const DRAW_TIMEOUT_S = 90;

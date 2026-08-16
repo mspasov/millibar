@@ -87,6 +87,15 @@ describe('envNumber', () => {
     process.env[NAME] = '10';
     expect(() => envNumber(NAME, 42, 1000)).toThrow('>= 1000');
   });
+
+  test('throws above the maximum', () => {
+    // MBAR_PRIORITY=101 is past the device's 1-100 range; on the wire its
+    // behaviour is undefined, so it must fail at parse time.
+    process.env[NAME] = '101';
+    expect(() => envNumber(NAME, 42, 1, 100)).toThrow('between 1 and 100');
+    process.env[NAME] = '100';
+    expect(envNumber(NAME, 42, 1, 100)).toBe(100);
+  });
 });
 
 describe('envFlag', () => {

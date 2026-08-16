@@ -55,7 +55,7 @@ const PAUSE_MS = 700;
 
 const WHITE = '#FFFFFFFF';
 const APP_NAME = 'sweep_test';
-const PRIORITY = envNumber('MBAR_PRIORITY', 50, 1);
+const PRIORITY = envNumber('MBAR_PRIORITY', 50, 1, 100);
 /** Refreshed by every draw; the screen self-clears if the process dies. */
 const DRAW_TIMEOUT_S = 60;
 const KEEPALIVE_MS = 20_000;
