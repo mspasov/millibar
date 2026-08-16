@@ -96,6 +96,12 @@ export function validateConfig(raw: unknown): DeviceConfig {
     if (typeof route?.name !== 'string' || route.name === '') {
       throw new Error("every route needs a 'name'");
     }
+    // 'env' is the label candidateRoutes gives the MBAR_ADDR override; a
+    // config route wearing it would shadow that meaning in every log line
+    // and `mbar probe` listing.
+    if (route.name === 'env') {
+      throw new Error("route name 'env' is reserved for the MBAR_ADDR override — pick another name");
+    }
     if (typeof route.addr !== 'string' || route.addr === '') {
       throw new Error(`route '${route.name}' needs an 'addr'`);
     }
@@ -260,8 +266,11 @@ async function resolveFresh(): Promise<Connection> {
 
   // The env route is trusted verbatim — no probe. Echo servers and test
   // fakes don't serve /api/version, and the point of MBAR_ADDR is "talk
-  // to exactly this, now".
-  if (routes[0]!.name === 'env') return asConnection(routes[0]!, '');
+  // to exactly this, now". Keyed on the env var itself, not the route's
+  // 'env' label: the label was a proxy any config route could wear (until
+  // validateConfig reserved it), silently inheriting the probe skip — and a
+  // captive portal then wins the way a real device would.
+  if (process.env.MBAR_ADDR) return asConnection(routes[0]!, '');
 
   // All probes start at once; selection then awaits them in priority order,
   // so a dead usb route delays a live lan answer by nothing but its own

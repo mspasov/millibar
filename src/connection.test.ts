@@ -121,6 +121,13 @@ describe('config file', () => {
     expect(() => loadDeviceConfig()).toThrow(configPath());
   });
 
+  test("rejects a route named 'env' — that label is the MBAR_ADDR override's", () => {
+    // A config route named env used to inherit the env override's probe
+    // skip (resolveFresh keyed on the label), letting `mbar set env <addr>`
+    // bypass the /api/version check that keeps captive portals out.
+    expect(() => saveDeviceConfig({ routes: [{ name: 'env', addr: '10.0.4.20' }] })).toThrow('reserved');
+  });
+
   test('rejects a probe_timeout_ms that would misbehave at probe time', () => {
     // null is what the pre-validation `mbar set --timeout abc` wrote (NaN
     // through JSON.stringify); 0 aborts every probe instantly; negatives
