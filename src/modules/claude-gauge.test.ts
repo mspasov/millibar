@@ -303,9 +303,17 @@ describe('render', () => {
   });
 
   test('an encoder switch retargets the sweep to the new window', async () => {
-    const module = makeModule(async () => usageFixture());
+    // A real (short) sweep duration: with sweepMs 0 a snap and a sweep are
+    // indistinguishable, and this test's name would claim more than it
+    // checks — the blind spot CLAUDE.md warns about. Same pattern as the
+    // dash and CPU suites.
+    const module = makeModule(async () => usageFixture(), { sweepMs: 80, sweepCoolMs: 0 });
     await module.poll();
+    await Bun.sleep(120); // the startup sweep settles at 5H 62%
     module.onEncoder!(1); // 5H 62% -> 7D 31%
+    const rolling = module.render({ refreshing: false })[2] as { text: string };
+    expect(rolling.text).not.toBe('31%'); // still en route from 62%
+    await Bun.sleep(120);
     const [, , pct, , fill] = module.render({ refreshing: false }) as Array<Record<string, unknown>>;
     expect(pct).toMatchObject({ text: '31%', color: COLORS.ok });
     expect(fill).toMatchObject({ width: Math.round((72 * 31) / 100) });
