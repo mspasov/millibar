@@ -1,0 +1,44 @@
+# Publishes to npm on every pushed v* tag, via OIDC trusted publishing — no token
+# secret exists anywhere (npm is sunsetting 2FA-bypass publish tokens ~Jan 2027).
+#
+# The committed manifest is deliberately unpublishable: private: true, and bin
+# points at src/mbar.ts so the bun-linked dev `mbar` runs live source. The flip
+# step below rewrites both fields into their publish shape inside this runner
+# only — see docs/PUBLISHING.md.
+#
+# The explicit check/test/build steps give per-step failure visibility;
+# prepublishOnly then re-runs the same gate inside npm publish. That ~25 s of
+# duplicated work is kept on purpose: prepublishOnly stays the authoritative
+# gate for every publish path, so the two can never drift apart.
+name: publish
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+  id-token: write # OIDC — lets npm verify the workflow identity; provenance comes free
+
+jobs:
+  publish:
+    # Forks that push a v* tag must not attempt a publish
+    if: github.repository == 'mspasov/millibar'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v5
+        with:
+          # npm >= 11.5.1 is required for trusted publishing; node 24 ships it
+          node-version: 24
+          registry-url: "https://registry.npmjs.org"
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun test
+      - run: bun run build
+      - run: test -f dist/mbar.js
+      - name: Flip the manifest to its publish shape
+        run: npm pkg delete private && npm pkg set bin.mbar=./dist/mbar.js
+      - run: npm publish
