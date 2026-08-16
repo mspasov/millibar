@@ -47,7 +47,10 @@ export interface CpuOptions {
 }
 
 export function cpuModule(options: CpuOptions = {}): MonitorModule {
-  const cores = options.cores ?? os.cpus().length;
+  // os.cpus() reports [] in some containers, and ?? lets that 0 through to
+  // the divisor — load/0 then renders as 100% (or NaN% at zero load). One
+  // core is the only floor that keeps the percentage meaningful.
+  const cores = Math.max(1, options.cores ?? os.cpus().length);
   const sample = options.loadavg ?? os.loadavg;
   let ctx: ModuleContext | null = null;
   let screenIndex = 0;

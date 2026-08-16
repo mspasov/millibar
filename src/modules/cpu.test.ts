@@ -45,6 +45,19 @@ describe('cpuModule', () => {
     expect(shownLabel(module)).toBe('CPU 15M');
   });
 
+  test('an empty os.cpus() falls back to one core instead of dividing by zero', async () => {
+    // Some containers report no CPUs; cores: 0 is what `?? os.cpus().length`
+    // produced there. Unguarded, load/0 pegged the bar at 100% — and a zero
+    // load rendered 'NaN%'.
+    const idle = makeModule({ sweepMs: 0, sweepCoolMs: 0, cores: 0, loadavg: () => [0, 0, 0] });
+    await idle.poll();
+    expect(shownPct(idle)).toBe('0%');
+
+    const busy = makeModule({ sweepMs: 0, sweepCoolMs: 0, cores: 0, loadavg: () => [0.5, 0, 0] });
+    await busy.poll();
+    expect(shownPct(busy)).toBe('50%'); // normalised by the 1-core floor
+  });
+
   test('local sampling never holds refreshes and polls on the 2s cadence', async () => {
     const module = makeModule({ sweepMs: 0, sweepCoolMs: 0, cores: 1, loadavg: () => [0, 0, 0] });
     expect(await module.poll()).toEqual({ nextPollMs: 2000, holdRefreshMs: 0 });
