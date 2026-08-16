@@ -51,6 +51,25 @@ instantaneous CPU%.
 
 ## Setup
 
+From npm:
+
+```sh
+bun add -g millibar         # or: npm install -g millibar
+mbar                        # run the monitor
+```
+
+Or try it without installing anything:
+
+```sh
+bunx millibar               # one-off run of the monitor (npx millibar works too)
+bunx millibar probe         # any subcommand; flags pass through as usual
+```
+
+Whichever package manager installs it, the CLI itself runs on Bun — 1.3+ must be on
+your `PATH` (`npm install -g` doesn't change that).
+
+From a clone, for development:
+
 ```sh
 bun install
 bun run tools/smoke.ts        # connectivity smoke test

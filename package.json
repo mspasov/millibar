@@ -1,12 +1,26 @@
 {
   "name": "millibar",
+  "version": "0.1.0",
+  "description": "BUSY Bar CLI and Claude Code usage monitor",
   "license": "MIT",
+  "repository": "github:mspasov/millibar",
+  "keywords": [
+    "busy-bar",
+    "claude-code",
+    "cli",
+    "usage-monitor"
+  ],
   "bin": {
     "mbar": "./src/mbar.ts"
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
+    "build": "bun build src/mbar.ts --outfile dist/mbar.js --target bun",
     "test": "bun test",
-    "check": "bunx tsc --noEmit"
+    "check": "bunx tsc --noEmit",
+    "prepublishOnly": "bun run check && bun test && bun run build"
   },
   "type": "module",
   "private": true,
@@ -14,10 +28,8 @@
     "bun": ">=1.3.0"
   },
   "devDependencies": {
+    "@busy-app/busy-lib": "^0.18.0",
     "@types/bun": "^1.3.14",
     "typescript": "^7.0.2"
-  },
-  "dependencies": {
-    "@busy-app/busy-lib": "^0.18.0"
   }
 }
