@@ -236,7 +236,18 @@ export async function listenInput(
     }
 
     if (signal?.aborted) break;
-    await Bun.sleep(2000); // back off before reconnecting
+    // Back off before reconnecting — abortably, like ModuleRunner's sleep:
+    // runHost's shutdown Promise.all waits on this listener, so a plain
+    // Bun.sleep here stalled an embedder's shutdown by up to the full 2 s.
+    await new Promise<void>((resolve) => {
+      const finish = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', finish);
+        resolve();
+      };
+      const timer = setTimeout(finish, 2000);
+      signal?.addEventListener('abort', finish, { once: true });
+    });
   }
 }
 

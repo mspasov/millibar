@@ -122,4 +122,21 @@ describe('listenInput', () => {
     });
     expect(errors).toEqual(['no button input over the cloud proxy — it rejects WebSocket upgrades']);
   });
+
+  test('an abort during the reconnect back-off returns promptly', async () => {
+    // The dead port makes every connect fail fast, so the listener spends
+    // nearly all its time in the 2 s back-off. An abort there must end the
+    // listen now — runHost's shutdown awaits this promise.
+    const controller = new AbortController();
+    const run = listenInput(() => {}, {
+      addr: '127.0.0.1:9',
+      signal: controller.signal,
+      onError: () => {},
+    });
+    await Bun.sleep(300); // let the first connect fail and the back-off start
+    const abortedAt = Date.now();
+    controller.abort();
+    await run;
+    expect(Date.now() - abortedAt).toBeLessThan(1000);
+  });
 });
