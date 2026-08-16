@@ -165,7 +165,10 @@ describe('runHost shutdown', () => {
     expect(events[events.length - 1]).toBe('clear');
     expect(process.listenerCount('SIGINT')).toBe(baseline);
     // The host also sets process.exitCode (so a mid-cleanup signal's bare
-    // exit() keeps the failure); undo that here or the test runner inherits it.
-    process.exitCode = savedExitCode;
+    // exit() keeps the failure); undo that here or the test runner inherits
+    // it and `bun test` exits 1 with every test passing — which is exactly
+    // what broke the v0.1.2 publish gate. In Bun, assigning undefined does
+    // NOT reset exitCode (it keeps the old value), hence the explicit 0.
+    process.exitCode = savedExitCode ?? 0;
   });
 });
