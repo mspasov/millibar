@@ -187,9 +187,17 @@ export function claudeDashModule(options: LimitModuleOptions): MonitorModule {
 
       const slots = stripSlots(poller.screens.length);
       const selectedSlot = slots[Math.min(screenIndex, slots.length - 1)]!;
-      // With a single window there is no selection to mark.
+      // With a single window there is no selection to mark. Past eight
+      // windows the panel is out of rows and the selected bar is not drawn
+      // at all (see stripSlots) — the marker hides too, because clamped to
+      // the last visible row it would point at a window that is not the
+      // selection. The text half still shows the real selection.
       const markerColor =
-        poller.screens.length > 1 ? (poller.stale ? COLORS.stale : COLORS.label) : HIDDEN(COLORS.label);
+        poller.screens.length > 1 && screenIndex < slots.length
+          ? poller.stale
+            ? COLORS.stale
+            : COLORS.label
+          : HIDDEN(COLORS.label);
 
       const bars: DrawElement[] = [];
       poller.screens.forEach((v, i) => {

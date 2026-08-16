@@ -126,6 +126,27 @@ describe('render', () => {
     expect(els.marker).toMatchObject({ fill_colors: [HIDDEN(COLORS.label)] });
   });
 
+  test('a selection past the eighth row hides the marker instead of lying', async () => {
+    // 5H + 7D + eight models = ten windows; the panel is out of rows past
+    // eight and those bars are not drawn (stripSlots). Selecting one of them
+    // used to park the marker on the last *visible* row, marking a window
+    // that was not the selection. The text half still shows the real one.
+    const models = Array.from({ length: 8 }, (_, i) => ({
+      model: `M${i}`,
+      utilization: 10 + i,
+      resetsAt: null,
+    }));
+    const module = makeModule(async () => usageFixture({ models }));
+    await module.poll();
+    for (let i = 0; i < 9; i++) module.onEncoder!(1); // to the tenth window
+    const els = byId(module);
+    expect(els.label).toMatchObject({ text: 'M7' });
+    expect(els.marker).toMatchObject({ fill_colors: [HIDDEN(COLORS.label)] });
+    // Back inside the strip the marker reappears on the selected row.
+    module.onEncoder!(-2);
+    expect(byId(module).marker).toMatchObject({ y: 8 + 7, fill_colors: [COLORS.label] });
+  });
+
   test('the selection survives a refresh that reorders the list', async () => {
     let usage = usageFixture();
     const module = makeModule(async () => usage);
