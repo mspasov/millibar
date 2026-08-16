@@ -77,6 +77,16 @@ describe('set', () => {
     expect(await runDeviceCommand('set', ['x', 'addr', '--token'])).toBe(1);
     expect(existsSync(configPath())).toBe(false);
   });
+
+  test('a malformed --timeout is rejected instead of saved mangled', async () => {
+    // 'abc' became NaN, JSON-serialised to null, and read back as the default
+    // — a set that looked applied and wasn't. 0 made every probe abort
+    // instantly; negatives threw from AbortSignal.timeout at probe time.
+    for (const value of ['abc', '0', '-1', 'Infinity']) {
+      expect(await runDeviceCommand('set', ['x', 'addr', '--timeout', value])).toBe(1);
+    }
+    expect(existsSync(configPath())).toBe(false);
+  });
 });
 
 describe('rm / order', () => {

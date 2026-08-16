@@ -120,6 +120,16 @@ describe('config file', () => {
     Bun.write(configPath(), '{nope');
     expect(() => loadDeviceConfig()).toThrow(configPath());
   });
+
+  test('rejects a probe_timeout_ms that would misbehave at probe time', () => {
+    // null is what the pre-validation `mbar set --timeout abc` wrote (NaN
+    // through JSON.stringify); 0 aborts every probe instantly; negatives
+    // throw from AbortSignal.timeout. Fail at load with the route named.
+    for (const ms of [null, 0, -1, '3000'] as unknown[]) {
+      const routes = [{ name: 'x', addr: '10.0.4.20', probe_timeout_ms: ms as number }];
+      expect(() => saveDeviceConfig({ routes })).toThrow("route 'x'");
+    }
+  });
 });
 
 describe('candidateRoutes', () => {

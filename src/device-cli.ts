@@ -151,7 +151,17 @@ function set(args: string[]): void {
       if (value === undefined) throw new Error(`${flag} needs a value`);
       if (flag === '--token') route.token = value;
       else if (flag === '--password') route.password = value;
-      else route.probe_timeout_ms = Number(value);
+      else {
+        // Validated like envNumber, not bare Number(): NaN JSON-serialises to
+        // null and silently restores the default (a set that looks applied and
+        // isn't), 0 makes AbortSignal.timeout abort every probe instantly, and
+        // a negative throws from AbortSignal.timeout at probe time.
+        const ms = Number(value);
+        if (!Number.isFinite(ms) || ms < 1) {
+          throw new Error(`--timeout must be a number of milliseconds >= 1, got '${value}'`);
+        }
+        route.probe_timeout_ms = ms;
+      }
     } else {
       throw new Error(`unknown flag '${flag}'`);
     }

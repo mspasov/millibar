@@ -99,6 +99,15 @@ export function validateConfig(raw: unknown): DeviceConfig {
     if (typeof route.addr !== 'string' || route.addr === '') {
       throw new Error(`route '${route.name}' needs an 'addr'`);
     }
+    // A hand-edited (or pre-validation `mbar set --timeout abc`, which wrote
+    // null) timeout must fail here with the route named, not at probe time as
+    // an instant abort or an AbortSignal.timeout throw.
+    if (route.probe_timeout_ms !== undefined) {
+      const ms = route.probe_timeout_ms;
+      if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 1) {
+        throw new Error(`route '${route.name}': probe_timeout_ms must be a number of milliseconds >= 1`);
+      }
+    }
     if (seen.has(route.name)) throw new Error(`duplicate route name '${route.name}'`);
     seen.add(route.name);
   }
