@@ -102,6 +102,16 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
   let switchedAway = false;
   let switchResume: ReturnType<typeof setTimeout> | null = null;
 
+  /** Until when repaints must wait out the firmware's BACK blank. The device
+   * acts on BACK *after* emitting the event: its blank lands 5–30 ms later
+   * (DEVICE.md), wiping any draw issued in between. The prompt's first paint
+   * and the farewell already wait this out; a repaint fired by the press that
+   * dismisses the prompt (encoder, START, the dial) raced it and lost — the
+   * module painted, the blank wiped it, and nothing recovered the screen
+   * until the next press or the 60 s heartbeat. */
+  let drawHoldUntil = 0;
+  let settleTimer: ReturnType<typeof setTimeout> | null = null;
+
   function drawFrame(elements: DrawElement[]): void {
     // Every draw except the farewell (which shutdown() sends itself) funnels
     // through here, so this one gate keeps a poll or prompt that outlives
@@ -124,6 +134,17 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
     // after disarming, so the suppression cannot outlive the window. The
     // same gate covers the switch: away from OFF the screen is the system's.
     if (quit.armed || switchedAway) return;
+    // Inside the BACK settle, defer to its end rather than drop: the state
+    // being painted (module switch, encoder move) is already applied, so the
+    // deferred repaint draws the right screen. One timer coalesces callers.
+    const settleMs = drawHoldUntil - Date.now();
+    if (settleMs > 0) {
+      settleTimer ??= setTimeout(() => {
+        settleTimer = null;
+        repaint();
+      }, settleMs);
+      return;
+    }
     const runner = active();
     const module = runner.module;
     const elements = module
@@ -253,6 +274,9 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
       } else if (event.button === 'BACK') {
         // Unreachable when MBAR_SWITCH_BUTTON=BACK claims the button above — the
         // remap keeps module cycling and gives up on-device quitting.
+        // Repaints hold until the firmware's blank for this press has landed;
+        // the prompt paints after the same settle (QuitConfirm.armDrawDelayMs).
+        drawHoldUntil = Date.now() + BACK_SETTLE_MS;
         quit.arm();
       } else {
         // Repaint on any other press: recovers a screen blanked by BACK or
@@ -276,12 +300,14 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
   }, heartbeatMs);
   controller.signal.addEventListener('abort', () => {
     clearInterval(heartbeat);
-    // Also stops the quit ticker and any pending switch-resume repaint: a
-    // frame drawn after the shutdown clear would re-register the application
-    // on the device.
+    // Also stops the quit ticker, any pending switch-resume repaint, and a
+    // settle-deferred repaint: a frame drawn after the shutdown clear would
+    // re-register the application on the device.
     quit.disarm();
     if (switchResume) clearTimeout(switchResume);
     switchResume = null;
+    if (settleTimer) clearTimeout(settleTimer);
+    settleTimer = null;
   });
 
   // Synced in the background at startup so a quit can play it immediately;
