@@ -187,9 +187,13 @@ export function progressBar(opts: {
  *
  * Redrawing an id as a *different* element type is rejected by the firmware
  * (HTTP 400 — and the 400 is not atomic: elements earlier in the request still
- * land), so a tombstone must re-emit the element it replaces: zero-alpha colour
- * fields where the type has them, and a 1-second timeout as the universal
- * fallback for types that don't (image, animation). Both verified on-device.
+ * land), so a tombstone must re-emit the element it replaces, made invisible
+ * the way its type allows — zero-alpha colour fields, or `opacity: 0` for the
+ * image types — plus a 1-second timeout that then removes it. The invisibility
+ * is what makes the switch instant: the timeout alone leaves the element on
+ * screen for its full second (measured on-device: an animation tombstoned by
+ * timeout only stayed up ~1.1 s under the next module's frame; with
+ * `opacity: 0` it was gone in the next 30 ms capture).
  */
 function tombstone(el: DrawElement): DrawElement {
   const expiring = { ...el, timeout: 1, display_until: undefined };
@@ -203,6 +207,9 @@ function tombstone(el: DrawElement): DrawElement {
         fill_colors: expiring.fill_colors.map(HIDDEN),
         border_color: HIDDEN(expiring.border_color),
       };
+    case 'image':
+    case 'animation':
+      return { ...expiring, opacity: 0 };
     default:
       return expiring;
   }

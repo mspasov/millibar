@@ -165,10 +165,19 @@ so a default-priority draw won't interrupt a focus session.
 > (text → rectangle or the reverse) is rejected with `400 {"error":"Bad request"}` —
 > and the 400 is **not atomic**: elements earlier in the same request still land, so one
 > bad element half-applies a frame. Verified both directions on firmware 1.1.1. To
-> retire an element whose id won't be drawn again, re-emit it as-is with its colour
-> fields zero-alpha'd (instant), or with `timeout: 1` (works for any type, gone within
-> a second). `DisplaySession` in `src/display.ts` does this automatically for ids that
-> disappear between consecutive draws.
+> retire an element whose id won't be drawn again, re-emit it as-is made invisible —
+> colour fields zero-alpha'd for text/countdown/rectangle, `opacity: 0` for
+> image/animation — plus `timeout: 1` to remove it. The invisibility is what makes it
+> instant: `timeout: 1` alone keeps the element visible for the *whole* second (measured
+> 2026-08-16 against `/api/screen`: an animation retired by timeout only stayed up ~1.1 s
+> under the next frame; with `opacity: 0` it was gone by the first 30 ms capture — this was
+> the history → grok switch leaving the chart under the gauge for a second). A
+> `display_until` in the past (`"1"`) also destroys an existing element on the spot
+> (~90 ms; the firmware treats a zero remaining time as a delete), but a request made
+> *only* of such elements against a closed screen is rejected as
+> `400 {"error":"Nothing to display"}`. `DisplaySession` in `src/display.ts` emits the
+> invisible-plus-timeout form automatically for ids that disappear between consecutive
+> draws.
 
 > **An application may hold at most 100 elements**, and the limit is on the *persisted
 > set*, not the request: exceeding it fails the whole draw with

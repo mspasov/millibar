@@ -148,6 +148,20 @@ describe('DisplaySession', () => {
     expect(tomb.border_color).toBe('#33DD6600');
   });
 
+  test('animation tombstones go opacity 0 — the timeout alone leaves them up for a second', async () => {
+    const sent: DisplayDrawParams[] = [];
+    const session = makeSession(sent);
+    await session.draw([
+      { id: 'chart', type: 'animation', path: 'chart.anim', section: '30d', loop: true,
+        await_previous_end: false, opacity: 100, x: 0, y: 0, display: 'front' },
+    ]);
+    await session.draw([text('a')]);
+    const tomb = sent[1]!.elements[1] as { type: string; opacity: number; section: string; timeout?: number };
+    // Still an animation with its section: a type swap 400s and a missing
+    // section would fall back to playing the whole file for its last second.
+    expect(tomb).toMatchObject({ type: 'animation', section: '30d', opacity: 0, timeout: 1 });
+  });
+
   test('a tombstone lost to a failed draw is retried on the next one', async () => {
     const sent: DisplayDrawParams[] = [];
     let failNext = false;
