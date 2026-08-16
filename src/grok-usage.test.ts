@@ -202,7 +202,23 @@ describe('fetchGrokUsage', () => {
     await expect(fetchGrokUsage()).rejects.toThrow(/not a weekly window.*MONTHLY/);
   });
 
-  test('the monthly envelope shape (no config.creditUsagePercent) is a parse error', async () => {
+  test('an omitted creditUsagePercent on a weekly window means 0 % used', async () => {
+    // proto3-style JSON drops fields at their default: the first poll after
+    // a weekly reset (nothing used yet) has no creditUsagePercent at all.
+    // Observed live 2026-08-16; must not be mistaken for shape drift.
+    arrange({ 'https://auth.x.ai::c1': session() }, () => Response.json(weeklyBody({ creditUsagePercent: undefined })));
+    const usage = await fetchGrokUsage();
+    expect(usage.usedPercent).toBe(0);
+    expect(usage.remainingPercent).toBe(100);
+    expect(usage.periodType).toBe('USAGE_PERIOD_TYPE_WEEKLY');
+  });
+
+  test('a non-numeric creditUsagePercent is a parse error, not 0', async () => {
+    arrange({ 'https://auth.x.ai::c1': session() }, () => Response.json(weeklyBody({ creditUsagePercent: '3' })));
+    await expect(fetchGrokUsage()).rejects.toThrow(/creditUsagePercent is not a number/);
+  });
+
+  test('the monthly envelope shape (no config.currentPeriod) is a parse error', async () => {
     // What the bare /v1/billing path returns — reaching this shape means the
     // query string was lost somewhere.
     arrange({ 'https://auth.x.ai::c1': session() }, () => Response.json({ monthlyLimit: 3000, used: 12 }));

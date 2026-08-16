@@ -165,10 +165,17 @@ export async function fetchGrokUsage(): Promise<GrokWeeklyUsage> {
   lastRawGrokBody = body;
 
   const config = body.config;
-  const used = config?.creditUsagePercent;
   const period = config?.currentPeriod;
-  if (typeof used !== 'number' || !Number.isFinite(used) || !period) {
-    throw new Error('grok usage: unexpected response shape (no config.creditUsagePercent / currentPeriod)');
+  if (!period) {
+    throw new Error('grok usage: unexpected response shape (no config.currentPeriod)');
+  }
+  // proto3-style JSON: a field at its default value is omitted, so a weekly
+  // window with nothing used yet has no creditUsagePercent at all (observed
+  // 2026-08-16, first poll after a reset). Absent means 0; the monthly
+  // envelope is still told apart by its missing currentPeriod above.
+  const used = config?.creditUsagePercent ?? 0;
+  if (typeof used !== 'number' || !Number.isFinite(used)) {
+    throw new Error(`grok usage: creditUsagePercent is not a number (${JSON.stringify(used)})`);
   }
   // Weekly only, by explicit type check: the same path without format=credits
   // serves a monthly envelope, and pretending that is a weekly window is the
@@ -245,10 +252,14 @@ export async function saveCachedGrokUsage(usage: GrokWeeklyUsage, path = GROK_US
 }
 
 if (import.meta.main) {
-  const usage = await fetchGrokUsage();
-  if (process.argv.includes('--raw')) {
-    console.log(JSON.stringify(lastRawGrokBody, null, 2));
-  } else {
-    console.log(JSON.stringify(usage, null, 2));
+  const raw = process.argv.includes('--raw');
+  try {
+    const usage = await fetchGrokUsage();
+    console.log(JSON.stringify(raw ? lastRawGrokBody : usage, null, 2));
+  } catch (error) {
+    // Shape drift is exactly when the raw body matters most: print it (it
+    // carries no credentials) alongside the parse error, then fail.
+    if (raw && lastRawGrokBody !== null) console.log(JSON.stringify(lastRawGrokBody, null, 2));
+    throw error;
   }
 }

@@ -100,7 +100,7 @@ Practical options, in order of preference for this repo:
 ```jsonc
 {
   "config": {
-    "creditUsagePercent": 3.0,           // used % of the weekly pool
+    "creditUsagePercent": 3.0,           // used % of the weekly pool — ABSENT when 0 (see below)
     "currentPeriod": {
       "type": "USAGE_PERIOD_TYPE_WEEKLY",
       "start": "2026-08-07T06:06:44.567993+00:00",
@@ -126,7 +126,7 @@ Practical options, in order of preference for this repo:
 
 | Concept | Field | Notes |
 |---|---|---|
-| Used % | `config.creditUsagePercent` | Observed as a float (e.g. `3.0`); treat as number, not assume integer. |
+| Used % | `config.creditUsagePercent` | Observed as a float (e.g. `3.0`); treat as number, not assume integer. **Omitted entirely when 0** — proto3-style JSON drops default-valued fields, so the first poll after a weekly reset has no such key (observed 2026-08-16). Absent = `0`; only a missing `currentPeriod` means the wrong envelope. |
 | **Remaining %** | `100 - creditUsagePercent` | Clamp to `[0, 100]` if the API ever overshoots. |
 | Cycle start | `config.currentPeriod.start` | **Account-specific**, not calendar Monday / midnight. Do not invent. |
 | Reset | `config.currentPeriod.end` | Prefer this over top-level `billingPeriodEnd` (they match when weekly). |
@@ -183,7 +183,8 @@ file as `NoCredentialsError` (“run `grok login`”).
 | 404 | Wrong URL (missing `format=credits` or wrong host). |
 | 429 | Honour `Retry-After` if present; same discipline as Claude usage (see USAGE-API.md). |
 | Network / timeout | Coalesce errors; do not spam the status light. |
-| Missing `config` / `creditUsagePercent` / `currentPeriod` | Parse failure — “usage unavailable”, keep last good cache if any. |
+| Missing `config` / `currentPeriod` | Parse failure — “usage unavailable”, keep last good cache if any. |
+| Missing `creditUsagePercent` (with a weekly `currentPeriod`) | **Not** a failure: 0 % used. |
 
 ## Rate limiting / poll cadence
 
@@ -229,7 +230,7 @@ curl -sS \
 | python3 -c '
 import sys, json
 c = json.load(sys.stdin)["config"]
-u = float(c["creditUsagePercent"])
+u = float(c.get("creditUsagePercent", 0))  # absent when 0
 p = c["currentPeriod"]
 print(f"used={u}% left={100-u}% start={p[\"start\"]} resets={p[\"end\"]} type={p[\"type\"]}")
 '
