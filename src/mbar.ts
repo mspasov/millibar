@@ -19,8 +19,8 @@
  * Env:   MBAR_ADDR, MBAR_ROUTE, MBAR_TOKEN, MBAR_PASSWORD,
  *        MBAR_CONFIG, MBAR_PRIORITY, MBAR_POLL_INTERVAL_MS, MBAR_REFRESH_COOLDOWN_MS,
  *        MBAR_MODULES (which modules run, comma-separated, in cycle order:
- *        gauge, dash, history, grok, cpu — unset runs all, with grok
- *        joining only when a `grok login` exists),
+ *        gauge, dash, history, grok, cpu — unset runs all whose sign-in
+ *        exists: gauge/dash need a Claude Code login, grok a `grok login`),
  *        MBAR_SWITCH_BUTTON (which button the dial press reports as; default OK),
  *        MBAR_ANIMATIONS (off disables the sweeps, the history intros, and
  *        the quit prompt's drain and turn-off farewell)
@@ -36,7 +36,7 @@ import { claudeGaugeModule } from './modules/claude-gauge';
 import { claudeHistoryModule } from './modules/claude-history';
 import { cpuModule } from './modules/cpu';
 import { grokGaugeModule } from './modules/grok-gauge';
-import { dedupedFetchUsage } from './usage';
+import { dedupedFetchUsage, hasClaudeCredentials } from './usage';
 
 // Flags work on any invocation (monitor or subcommand) and anywhere in the
 // argv, so they're stripped before command dispatch. Each becomes its env
@@ -152,14 +152,16 @@ const roster = [
   { aliases: ['cpu'], value: () => cpuModule(sweepOptions) },
 ];
 
-// The default roster only includes Grok when a `grok login` exists — missing
-// credentials would otherwise kill the whole monitor at first poll for
-// everyone who never installed the Grok CLI. Naming it explicitly still gets
-// the loud fatal error, which is the right answer to `--modules grok` on a
-// machine with nothing to show.
-let selected = roster
-  .filter((choice) => choice.aliases[0] !== 'grok' || hasGrokCredentials())
-  .map((choice) => choice.value);
+// The default roster only includes the usage modules whose sign-in exists —
+// a missing login is fatal on first poll (by contract: retrying cannot fix
+// it), and one absent login must not take down the modules that need no
+// credentials at all (history reads a local file, CPU reads the kernel).
+// Naming a module explicitly still gets the loud fatal error, which is the
+// right answer to `--modules gauge` on a machine with nothing to show. Grok's
+// absence is silent (most machines never ran `grok login`); Claude's gets a
+// line, because a monitor installed for Claude usage coming up without it
+// would otherwise look broken for no stated reason.
+let selected: Array<() => ReturnType<(typeof roster)[number]['value']>>;
 if (process.env.MBAR_MODULES) {
   try {
     selected = selectModules(process.env.MBAR_MODULES, roster);
@@ -167,6 +169,21 @@ if (process.env.MBAR_MODULES) {
     console.error((error as Error).message);
     process.exit(1);
   }
+} else {
+  const claude = hasClaudeCredentials();
+  if (!claude) {
+    console.error(
+      'no Claude Code sign-in found — running without the Claude usage modules (run `claude auth`, or name them via --modules to see the full error)'
+    );
+  }
+  selected = roster
+    .filter((choice) => {
+      const name = choice.aliases[0]!;
+      if (name === 'gauge' || name === 'dash') return claude;
+      if (name === 'grok') return hasGrokCredentials();
+      return true;
+    })
+    .map((choice) => choice.value);
 }
 
 await runHost(

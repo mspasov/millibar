@@ -155,6 +155,17 @@ function readCredentials(): Credentials | null {
   return readCredentialsFile();
 }
 
+/** Whether a Claude Code sign-in exists here (Keychain item or
+ * `.credentials.json`) — mbar uses this to leave the Claude usage modules out
+ * of the default roster rather than die on first poll, the same courtesy the
+ * Grok module gets. Same predicate as the fetch path, and the keychain
+ * discovery it runs is memoized for the process, so a signed-in monitor pays
+ * nothing extra. An expired token still counts: the fetch path refreshes it
+ * via the claude CLI, and failing that is a recoverable poll error. */
+export function hasClaudeCredentials(): boolean {
+  return readCredentials() !== null;
+}
+
 /**
  * Let the Claude Code CLI own the OAuth refresh exchange, then re-read what it
  * stored — avoids duplicating private OAuth client details here.
