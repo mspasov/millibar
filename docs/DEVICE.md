@@ -194,6 +194,16 @@ so a default-priority draw won't interrupt a focus session.
 > (`src/anim.ts` + `/api/assets/upload`, one element total — see the animation-section
 > notes below and `src/modules/claude-history.ts` for the pattern).
 
+> **A draw costs ~3 ms per element in round trip.** A one-element frame answers in ~11 ms
+> (the LED pulse frames), a 17-element dash frame in 40–75 ms (measured 2026-08-16,
+> firmware 1.1.1, serial draws). That is the ceiling on frame rate: a client that
+> serialises its draws and issues frames faster than that — an animation ticking at
+> 33 ms — builds a backlog for as long as it animates, and anything issued behind it (a
+> button's repaint) waits its turn: 40 frames over 680 ms put a following draw 1.2 s
+> late. Coalesce — one in flight, one waiting, newest replaces the waiting one
+> (`DisplaySession` in `src/display.ts`); measured that way the same burst delayed the
+> following draw by 100 ms.
+
 ```sh
 # Draw scrolling green text on the front display for 20s
 curl -X POST http://10.0.4.20/api/display/draw \

@@ -3,11 +3,13 @@
  * and text helpers measured against the real firmware, and `DisplaySession` —
  * the one object through which a process should touch the display.
  *
- * `DisplaySession` serialises draws, stamps element timeouts, and scrubs
- * elements whose ids disappear between consecutive draws ("tombstoning").
- * Elements persist by id on the device, so a redraw that omits one leaves it
- * on screen; the session turns that firmware behaviour into a non-issue for
- * callers that simply stop drawing an element.
+ * `DisplaySession` serialises draws (one in flight, one waiting — a newer
+ * frame replaces the waiting one, so animation ticks cannot pile up ahead of
+ * a button press), stamps element timeouts, and scrubs elements whose ids
+ * disappear between consecutive draws ("tombstoning"). Elements persist by id
+ * on the device, so a redraw that omits one leaves it on screen; the session
+ * turns that firmware behaviour into a non-issue for callers that simply stop
+ * drawing an element.
  */
 import type { DisplayDrawParams } from '@busy-app/busy-lib';
 import { deviceFetch } from './connection';
@@ -235,6 +237,12 @@ export class DisplaySession {
    * element cannot escape scrubbing when the draw carrying it is dropped. */
   private pending = new Map<string, DrawElement>();
 
+  /** The one frame waiting behind the in-flight request. Every draw is a full
+   * frame, so a newer one supersedes it: callers that drew into this slot all
+   * get the outcome of whichever frame actually goes out. Detached (not
+   * cancelled) by clear(), so a draw issued after a clear queues behind it. */
+  private queued: { elements: DrawElement[]; ledColor?: string; promise: Promise<void> } | null = null;
+
   constructor(private readonly options: DisplaySessionOptions) {}
 
   /** Draws are serialised so concurrent callers (an encoder spin during a poll
@@ -245,30 +253,64 @@ export class DisplaySession {
     return next;
   }
 
+  /**
+   * Draws a full frame — everything that should be on screen; ids missing
+   * since the previous frame are scrubbed. At most one request is in flight
+   * and one frame waits behind it: a draw arriving while a frame is already
+   * waiting replaces that frame instead of queueing behind it. A frame is
+   * the whole picture, so nothing is lost by skipping a stale one — and
+   * without this the sweep tickers (two per module at 33 ms) outrun the
+   * device (a 17-element dash frame takes 40–75 ms to draw), the backlog
+   * grows for the length of the animation, and a dial press issued at its
+   * end landed 1.2 s late (measured; see the commit that added this).
+   */
   draw(elements: DrawElement[], ledColor?: string): Promise<void> {
-    return this.serialise(async () => {
-      const stamped = elements.map((el) => {
-        if (!el.id) throw new Error('every element needs an id — ids drive persistence and scrubbing');
-        return { ...el, timeout: this.options.timeoutS, display_until: undefined };
-      });
-      const ids = new Set(stamped.map((el) => el.id));
-      for (const [id, el] of this.last) {
-        if (!ids.has(id)) this.pending.set(id, el);
-      }
-      for (const id of ids) this.pending.delete(id);
-      this.last = new Map(stamped.map((el) => [el.id, el]));
-      if (stamped.length === 0 && this.pending.size === 0) return;
-      await (this.options.send ?? displayDraw)({
-        application_name: this.options.applicationName,
-        priority: this.options.priority,
-        ...(ledColor ? { led_notification_color: ledColor } : {}),
-        elements: [...stamped, ...[...this.pending.values()].map(tombstone)],
-      });
-      this.pending.clear();
+    const waiting = this.queued;
+    if (waiting) {
+      waiting.elements = elements;
+      // A colour on either frame still reaches the light: the notification
+      // preset restarts on any draw that carries one, so the latest wins.
+      if (ledColor !== undefined) waiting.ledColor = ledColor;
+      return waiting.promise;
+    }
+    const slot = { elements, ledColor } as NonNullable<typeof this.queued>;
+    // serialise() runs the work asynchronously (a microtask at the earliest),
+    // so the slot is registered before it can start — and it detaches itself
+    // as it starts, so the next draw opens a fresh slot behind it.
+    slot.promise = this.serialise(() => {
+      if (this.queued === slot) this.queued = null;
+      return this.send(slot.elements, slot.ledColor);
     });
+    this.queued = slot;
+    return slot.promise;
+  }
+
+  private async send(elements: DrawElement[], ledColor?: string): Promise<void> {
+    const stamped = elements.map((el) => {
+      if (!el.id) throw new Error('every element needs an id — ids drive persistence and scrubbing');
+      return { ...el, timeout: this.options.timeoutS, display_until: undefined };
+    });
+    const ids = new Set(stamped.map((el) => el.id));
+    for (const [id, el] of this.last) {
+      if (!ids.has(id)) this.pending.set(id, el);
+    }
+    for (const id of ids) this.pending.delete(id);
+    this.last = new Map(stamped.map((el) => [el.id, el]));
+    if (stamped.length === 0 && this.pending.size === 0) return;
+    await (this.options.send ?? displayDraw)({
+      application_name: this.options.applicationName,
+      priority: this.options.priority,
+      ...(ledColor ? { led_notification_color: ledColor } : {}),
+      elements: [...stamped, ...[...this.pending.values()].map(tombstone)],
+    });
+    this.pending.clear();
   }
 
   clear(): Promise<void> {
+    // A frame waiting ahead of the clear still goes out (chain order), but
+    // it stops accepting replacements: a draw issued after the clear must
+    // land after it, not be folded into a frame that the clear then wipes.
+    this.queued = null;
     return this.serialise(() => {
       this.last.clear();
       this.pending.clear();

@@ -8,7 +8,9 @@
  * The tween is time-based, not step-based: `current()` computes the eased
  * position from the wall clock, so however fast the device actually draws,
  * the animation lands on schedule and merely drops frames under backpressure
- * (DisplaySession serialises draws). `onFrame` is the repaint driver —
+ * (DisplaySession keeps one frame waiting behind the in-flight draw and lets
+ * a newer tick replace it — a 17-element frame takes ~50 ms on the device,
+ * so most ticks are dropped). `onFrame` is the repaint driver —
  * a module's `ctx.requestRender`, which the host no-ops while the module is
  * hidden — ticking from `to()` until the head has cooled.
  */

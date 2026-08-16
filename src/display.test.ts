@@ -210,6 +210,83 @@ describe('DisplaySession', () => {
     await expect(session.draw([text('')])).rejects.toThrow(/needs an id/);
   });
 
+  /** A send that completes only when the test says so — the device is slow. */
+  function gatedSession(sent: DisplayDrawParams[]) {
+    const gates: Array<() => void> = [];
+    const session = new DisplaySession({
+      applicationName: 'test_app',
+      priority: 50,
+      timeoutS: 90,
+      send: (body) =>
+        new Promise<void>((resolve) => {
+          sent.push(body);
+          gates.push(resolve);
+        }),
+      clear: async () => { sent.push({ application_name: 'clear', priority: 0, elements: [] }); },
+    });
+    const release = () => gates.shift()?.();
+    return { session, release };
+  }
+  const settle = () => new Promise<void>((r) => setTimeout(r, 0));
+
+  test('frames issued while one is in flight collapse to the newest', async () => {
+    const sent: DisplayDrawParams[] = [];
+    const { session, release } = gatedSession(sent);
+    const first = session.draw([text('a')]);
+    await settle(); // 'a' is on the wire
+    const b = session.draw([text('b')]);
+    const c = session.draw([text('c')]);
+    const d = session.draw([text('d')]);
+    release();
+    await first;
+    await settle();
+    release();
+    await Promise.all([b, c, d]);
+    // 'a', then 'd' — 'b' and 'c' were superseded before they were sent…
+    expect(sent.map((body) => body.elements[0]!.id)).toEqual(['a', 'd']);
+    // …so 'a' is scrubbed by the frame that replaced it, and 'b'/'c' owe nothing.
+    expect(sent[1]!.elements.map((el) => el.id)).toEqual(['d', 'a']);
+  });
+
+  test('a burst of animation ticks and a press ends in exactly two more requests', async () => {
+    const sent: DisplayDrawParams[] = [];
+    const { session, release } = gatedSession(sent);
+    void session.draw([rect('fill')]);
+    await settle();
+    // Twenty sweep ticks land during the in-flight draw, then the dial press.
+    for (let i = 0; i < 20; i++) void session.draw([{ ...rect('fill'), x: i }]);
+    const press = session.draw([text('next-module')]);
+    release();
+    await settle();
+    release();
+    await press;
+    expect(sent).toHaveLength(2);
+    expect(sent[1]!.elements[0]!.id).toBe('next-module');
+  });
+
+  test('a draw issued after clear() lands after it, not folded into the frame ahead', async () => {
+    const sent: DisplayDrawParams[] = [];
+    const { session, release } = gatedSession(sent);
+    const a = session.draw([text('a')]);
+    await settle();
+    const b = session.draw([text('b')]);
+    const cleared = session.clear();
+    const c = session.draw([text('c')]);
+    release();
+    await a;
+    await settle();
+    release();
+    await Promise.all([b, cleared]);
+    await settle();
+    release();
+    await c;
+    expect(sent.map((body) => body.application_name === 'clear' ? 'clear' : body.elements[0]!.id)).toEqual([
+      'a', 'b', 'clear', 'c',
+    ]);
+    // The clear forgot 'b', so 'c' owes it no tombstone.
+    expect(sent[3]!.elements.map((el) => el.id)).toEqual(['c']);
+  });
+
   test('an injected clear keeps the whole session off the network', async () => {
     const sent: DisplayDrawParams[] = [];
     let cleared = 0;
