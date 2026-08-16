@@ -15,13 +15,6 @@ import { SAMPLE_RATE, pcm16 } from '../src/snd';
 const APP_NAME = 'claude_sound';
 const FILE_NAME = 'chime.snd';
 
-const notes = process.argv.slice(2).map(Number);
-if (notes.some(Number.isNaN)) {
-  console.error('Arguments must be frequencies in Hz');
-  process.exit(1);
-}
-const freqs = notes.length > 0 ? notes : [659.25, 880]; // E5, A5
-
 function synthesizeChime(frequencies: number[]): Float64Array {
   const noteSpacing = 0.12; // seconds between note onsets
   const noteLength = 0.7; // seconds each note rings
@@ -46,19 +39,29 @@ function synthesizeChime(frequencies: number[]): Float64Array {
   return samples;
 }
 
-const bar = await connectedBar();
+// Guarded like every tool: importing this file must never talk to the device.
+if (import.meta.main) {
+  const notes = process.argv.slice(2).map(Number);
+  if (notes.some(Number.isNaN)) {
+    console.error('Arguments must be frequencies in Hz');
+    process.exit(1);
+  }
+  const freqs = notes.length > 0 ? notes : [659.25, 880]; // E5, A5
 
-const pcm = pcm16(synthesizeChime(freqs));
-console.log(
-  `Synthesized ${freqs.map((f) => f.toFixed(0)).join('+')}Hz chime: ` +
-    `${(pcm.length / SAMPLE_RATE).toFixed(2)}s, ${(pcm.byteLength / 1024).toFixed(1)} KiB`
-);
+  const bar = await connectedBar();
 
-await bar.AssetsUpload(
-  { application_name: APP_NAME, file: FILE_NAME, data: new Blob([pcm.buffer as ArrayBuffer]) },
-  { timeout: 30000 }
-);
-console.log('Uploaded to device');
+  const pcm = pcm16(synthesizeChime(freqs));
+  console.log(
+    `Synthesized ${freqs.map((f) => f.toFixed(0)).join('+')}Hz chime: ` +
+      `${(pcm.length / SAMPLE_RATE).toFixed(2)}s, ${(pcm.byteLength / 1024).toFixed(1)} KiB`
+  );
 
-await bar.AudioPlay({ application_name: APP_NAME, path: FILE_NAME });
-console.log('Playing');
+  await bar.AssetsUpload(
+    { application_name: APP_NAME, file: FILE_NAME, data: new Blob([pcm.buffer as ArrayBuffer]) },
+    { timeout: 30000 }
+  );
+  console.log('Uploaded to device');
+
+  await bar.AudioPlay({ application_name: APP_NAME, path: FILE_NAME });
+  console.log('Playing');
+}

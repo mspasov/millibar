@@ -15,8 +15,6 @@ const FRAME_COUNT = 90; // 3s perfect loop
 const APP_NAME = 'claude_anim';
 const FILE_NAME = 'plasma.anim';
 
-const playSeconds = Number(process.argv[2] ?? 30);
-
 function hsvToRgb(h: number, s: number, v: number): [number, number, number] {
   const i = Math.floor(h * 6);
   const f = h * 6 - i;
@@ -60,34 +58,38 @@ function generateFrames(): Uint8Array[] {
   return frames;
 }
 
-const bar = await connectedBar();
+// Guarded like every tool: importing this file must never talk to the device.
+if (import.meta.main) {
+  const playSeconds = Number(process.argv[2] ?? 30);
+  const bar = await connectedBar();
 
-console.log(`Generating ${FRAME_COUNT} frames of ${WIDTH}x${HEIGHT} plasma...`);
-const anim = encodeAnim(generateFrames(), { width: WIDTH, height: HEIGHT, fps: FPS });
-console.log(`Encoded ${FILE_NAME}: ${(anim.length / 1024).toFixed(1)} KiB`);
+  console.log(`Generating ${FRAME_COUNT} frames of ${WIDTH}x${HEIGHT} plasma...`);
+  const anim = encodeAnim(generateFrames(), { width: WIDTH, height: HEIGHT, fps: FPS });
+  console.log(`Encoded ${FILE_NAME}: ${(anim.length / 1024).toFixed(1)} KiB`);
 
-await bar.AssetsUpload(
-  { application_name: APP_NAME, file: FILE_NAME, data: new Blob([anim.buffer as ArrayBuffer]) },
-  { timeout: 30000 }
-);
-console.log('Uploaded to device');
+  await bar.AssetsUpload(
+    { application_name: APP_NAME, file: FILE_NAME, data: new Blob([anim.buffer as ArrayBuffer]) },
+    { timeout: 30000 }
+  );
+  console.log('Uploaded to device');
 
-await bar.DisplayDraw({
-  application_name: APP_NAME,
-  priority: 50,
-  elements: [
-    {
-      id: 'plasma',
-      type: 'animation',
-      path: FILE_NAME,
-      loop: true,
-      await_previous_end: false,
-      opacity: 100,
-      timeout: playSeconds,
-      x: 0,
-      y: 0,
-      display: 'front',
-    },
-  ],
-});
-console.log(`Playing on front display for ${playSeconds}s`);
+  await bar.DisplayDraw({
+    application_name: APP_NAME,
+    priority: 50,
+    elements: [
+      {
+        id: 'plasma',
+        type: 'animation',
+        path: FILE_NAME,
+        loop: true,
+        await_previous_end: false,
+        opacity: 100,
+        timeout: playSeconds,
+        x: 0,
+        y: 0,
+        display: 'front',
+      },
+    ],
+  });
+  console.log(`Playing on front display for ${playSeconds}s`);
+}

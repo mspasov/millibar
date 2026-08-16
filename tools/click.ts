@@ -38,50 +38,53 @@ function synthesizeClick(): Int16Array {
   return pcm16(samples);
 }
 
-const bar = await connectedBar();
+// Guarded like every tool: importing this file must never talk to the device.
+if (import.meta.main) {
+  const bar = await connectedBar();
 
-const pcm = synthesizeClick();
-await bar.AssetsUpload(
-  { application_name: APP_NAME, file: FILE_NAME, data: new Blob([pcm.buffer as ArrayBuffer]) },
-  { timeout: 30000 }
-);
-console.log(`Uploaded ${FILE_NAME} (${pcm.byteLength} bytes)`);
+  const pcm = synthesizeClick();
+  await bar.AssetsUpload(
+    { application_name: APP_NAME, file: FILE_NAME, data: new Blob([pcm.buffer as ArrayBuffer]) },
+    { timeout: 30000 }
+  );
+  console.log(`Uploaded ${FILE_NAME} (${pcm.byteLength} bytes)`);
 
-let lastClick = 0;
-let inFlight = false;
+  let lastClick = 0;
+  let inFlight = false;
 
-async function click(): Promise<void> {
-  const now = Date.now();
-  if (inFlight || now - lastClick < MIN_CLICK_INTERVAL_MS) return;
-  inFlight = true;
-  lastClick = now;
-  try {
-    await bar.AudioPlay({ application_name: APP_NAME, path: FILE_NAME });
-  } catch (error) {
-    console.error(`click failed: ${(error as Error).message}`);
-  } finally {
-    inFlight = false;
+  const click = async (): Promise<void> => {
+    const now = Date.now();
+    if (inFlight || now - lastClick < MIN_CLICK_INTERVAL_MS) return;
+    inFlight = true;
+    lastClick = now;
+    try {
+      await bar.AudioPlay({ application_name: APP_NAME, path: FILE_NAME });
+    } catch (error) {
+      console.error(`click failed: ${(error as Error).message}`);
+    } finally {
+      inFlight = false;
+    }
+  };
+
+  if (process.argv.includes('--once')) {
+    await click();
+    console.log('Played one click');
+    process.exit(0);
   }
+
+  const controller = new AbortController();
+  process.on('SIGINT', () => {
+    controller.abort();
+    process.exit(0);
+  });
+
+  console.log('Turn the dial to click (Ctrl-C to stop)');
+  await listenInput(
+    (event) => {
+      if (event.type !== 'encoder') return;
+      console.log(`[${new Date().toLocaleTimeString()}] encoder ${event.delta > 0 ? '+' : ''}${event.delta}`);
+      void click();
+    },
+    { signal: controller.signal, onError: (e) => console.error(e.message) }
+  );
 }
-
-if (process.argv.includes('--once')) {
-  await click();
-  console.log('Played one click');
-  process.exit(0);
-}
-
-const controller = new AbortController();
-process.on('SIGINT', () => {
-  controller.abort();
-  process.exit(0);
-});
-
-console.log('Turn the dial to click (Ctrl-C to stop)');
-await listenInput(
-  (event) => {
-    if (event.type !== 'encoder') return;
-    console.log(`[${new Date().toLocaleTimeString()}] encoder ${event.delta > 0 ? '+' : ''}${event.delta}`);
-    void click();
-  },
-  { signal: controller.signal, onError: (e) => console.error(e.message) }
-);
