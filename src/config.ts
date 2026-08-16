@@ -45,10 +45,15 @@ export function apiPath(addr: string, path: string): string {
 }
 
 /** `http://…` base URL for the device, without a trailing slash. The proxy
- * gets https by default (it redirects plain http). */
+ * gets https by default (it redirects plain http). Scheme detection must be
+ * case-insensitive like isProxyAddr's strip, or `HTTP://10.0.4.20` reads as
+ * a bare host and glues to `http://HTTP://…` — the documented ws://http://…
+ * failure, one uppercase paste away. The scheme is lowercased so wsBase's
+ * `^http` -> `ws` rewrite always matches. */
 export function httpBase(addr = deviceAddr()): string {
   const scheme = isProxyAddr(addr) ? 'https' : 'http';
-  const url = /^https?:\/\//.test(addr) ? addr : `${scheme}://${addr}`;
+  const match = /^(https?):\/\/(.*)$/i.exec(addr);
+  const url = match ? `${match[1]!.toLowerCase()}://${match[2]}` : `${scheme}://${addr}`;
   return url.replace(/\/+$/, '');
 }
 

@@ -19,6 +19,15 @@ describe('httpBase / wsBase', () => {
     expect(wsBase('http://10.0.4.20')).toBe('ws://10.0.4.20');
     expect(wsBase('https://busy.bar/')).toBe('wss://busy.bar');
   });
+
+  test('uppercase schemes are recognised and normalised, not glued', () => {
+    // isProxyAddr strips schemes case-insensitively; scheme detection here
+    // must match, or HTTP://… reads as a bare host and glues.
+    expect(httpBase('HTTP://10.0.4.20')).toBe('http://10.0.4.20');
+    expect(httpBase('HTTPS://api.busy.app')).toBe('https://api.busy.app');
+    expect(wsBase('HTTP://10.0.4.20')).toBe('ws://10.0.4.20');
+    expect(wsBase('Https://busy.bar/')).toBe('wss://busy.bar');
+  });
 });
 
 describe('cloud proxy addressing', () => {
