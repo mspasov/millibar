@@ -1,16 +1,16 @@
 /**
- * Renders the README's screen mockups locally — no device — by running the
- * real modules' render() on curated fixture data and rasterizing the element
- * lists with the firmware's own fonts, then drawing the frame as a glowing
- * LED matrix.
+ * Renders the README's screen loops locally — no device — by driving the
+ * real modules' render() over a scripted timeline on curated fixture data,
+ * rasterizing each frame with the firmware's own fonts, drawing it as a
+ * glowing LED matrix, and packing the frames as a looping APNG whose default
+ * image is the settled hero frame (so a non-animating viewer gets the still).
  *
  * Usage:
- *   bun run tools/readme-shots.ts generate [--fw <busybar-firmware>]
- *   bun run tools/readme-shots.ts validate <real-gauge.png> [--fw <path>]
- *
- * The firmware checkout supplies the fonts (assets/shared/fonts/*.font):
- *   git clone --depth 1 https://github.com/busy-app/busybar-firmware
- * The path can also come from MBAR_FW.
+ *   bun run tools/readme-shots.ts generate [--preview <dir>]   # docs/img/*.png, or a preview dir + index.html
+ *   bun run tools/readme-shots.ts check                        # exit 1 if docs/img is stale (release gate)
+ *   bun run tools/readme-shots.ts validate <real-gauge.png>    # rasterizer vs a real /api/screen capture
+ *   [--fw <busybar-firmware checkout>]  fonts; default fetches them from GitHub at FIRMWARE_REV, cached
+ *   [--cell <px>] [--tick <ms>]         bench knobs for size/smoothness trade-offs
  *
  * Fidelity rests on porting the firmware's exact text semantics — see
  * DEVICE.md, "Text element fonts". `validate` proves the port: it renders
@@ -19,19 +19,30 @@
  * a baseline) and diffs the local raster against the device's framebuffer.
  * At last check the two matched pixel-for-pixel.
  *
- * `generate` overwrites docs/img/*.png with the curated showcase set.
+ * Determinism is the point of the design: the clock is pinned, the fixtures
+ * are seeded, the fonts are pinned to a firmware revision — so a regeneration
+ * is byte-identical unless a render changed, and `check` can gate a release.
  */
 import { inflateSync } from 'node:zlib';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { encodePng } from '../src/png';
+import { encodeApng } from '../src/png';
 import type { ModuleContext, MonitorModule } from '../src/module';
 import { claudeGaugeModule } from '../src/modules/claude-gauge';
 import { claudeDashModule } from '../src/modules/claude-dash';
 import { grokGaugeModule } from '../src/modules/grok-gauge';
 import { cpuModule } from '../src/modules/cpu';
-import { claudeHistoryModule, paintBars, paintHeatmap, windowDays, SCREENS } from '../src/modules/claude-history';
+import {
+  claudeHistoryModule,
+  introBarsFrames,
+  introHeatFrames,
+  paintBars,
+  paintHeatmap,
+  windowDays,
+  INTRO_FPS as HISTORY_FPS,
+  SCREENS,
+} from '../src/modules/claude-history';
 import type { DayTokens } from '../src/stats';
 import type { Usage } from '../src/usage';
 import type { GrokWeeklyUsage } from '../src/grok-usage';
@@ -39,6 +50,11 @@ import type { GrokWeeklyUsage } from '../src/grok-usage';
 const W = 72;
 const H = 16;
 const OUT_DIR = join(import.meta.dir, '../docs/img');
+/** Rendered pixels per LED: a 750px-wide panel. File size scales with the
+ * square of this — 12 (the old stills' 900px) costs ~45% more per loop, and
+ * GitHub shows either at roughly README width. Chosen by eye on 2026-08-17
+ * against 8 and 12. */
+let CELL = 10;
 
 // ---------------------------------------------------------------- binfont --
 // LVGL binary font (lv_binfont_loader.c): 'head' metrics, 'cmap' subtables,
@@ -288,9 +304,8 @@ export function rasterize(elements: unknown[], fonts: Record<string, Font>, base
 /** Draws a 1× frame as an LED panel: round dots with the unlit matrix
  * faintly visible, plus additive bloom around lit pixels. The user picked
  * this style over flat squares and stronger glow variants. */
-export function renderGlow(fb: Uint8Array): { rgb: Uint8Array; width: number; height: number } {
-  const cell = 12;
-  const pad = 18;
+export function renderGlow(fb: Uint8Array, cell = CELL): { rgb: Uint8Array; width: number; height: number } {
+  const pad = Math.round(cell * 1.5);
   const width = W * cell + pad * 2;
   const height = H * cell + pad * 2;
   const acc = new Float64Array(width * height * 3);
@@ -363,29 +378,6 @@ const nullContext = (): ModuleContext => ({
   signal: new AbortController().signal,
 });
 
-async function renderModule(module: MonitorModule, fonts: Record<string, Font>): Promise<Uint8Array> {
-  module.init?.(nullContext());
-  await module.poll();
-  return rasterize(module.render({ refreshing: false }), fonts);
-}
-
-async function loadFonts(fwPath: string): Promise<Record<string, Font>> {
-  // The draw API's font-name table (api_display.c): small = busy_regular_5,
-  // normal = busy_regular_7.
-  const dir = join(fwPath, 'assets/shared/fonts');
-  const load = async (name: string) => {
-    const file = Bun.file(join(dir, name));
-    if (!(await file.exists())) {
-      throw new Error(
-        `${join(dir, name)} not found — pass --fw (or set MBAR_FW) to a checkout of\n` +
-          `  git clone --depth 1 https://github.com/busy-app/busybar-firmware`
-      );
-    }
-    return parseBinfont(Buffer.from(await file.arrayBuffer()));
-  };
-  return { small: await load('busy_regular_5.font'), normal: await load('busy_regular_7.font') };
-}
-
 const hours = (n: number) => new Date(Date.now() + n * 3_600_000).toISOString();
 
 async function validate(baselinePath: string, fonts: Record<string, Font>): Promise<number> {
@@ -457,8 +449,118 @@ async function validate(baselinePath: string, fonts: Record<string, Font>): Prom
   return mismatches;
 }
 
-async function generate(fonts: Record<string, Font>): Promise<void> {
-  const shots: Record<string, Uint8Array> = {};
+// ------------------------------------------------------------ the clock --
+
+/** Everything the modules time — sweeps, reset countdowns, the pace tick, the
+ * history fixture's calendar — reads Date.now. Pinning it (a Monday noon) is
+ * what makes a regeneration byte-identical unless a render actually changed,
+ * so `check` can tell stale visuals from a mere re-run. Only `generate` and
+ * `check` install it; `validate` compares against a real capture and stays on
+ * real time. */
+const EPOCH = Date.parse('2026-01-05T12:00:00Z');
+let clock = EPOCH;
+function installClock(): void {
+  Date.now = () => clock;
+}
+
+/** Sampling cadence for the loops, an integer number of ms so the APNG
+ * timeline carries no rounding drift. 50 ms (20 fps) is about what the
+ * device itself sustains mid-sweep (a 17-element frame takes ~50 ms to
+ * draw), so the loops move like the hardware does; a 500 ms sweep gets 10
+ * frames. Frame count is the file-size lever: sweep frames repaint the whole
+ * bar and its glow, so each costs as much as a still. */
+let TICK_MS = 50;
+
+/**
+ * Drives one module along a scripted timeline and collects the frames. The
+ * modules never learn they are being filmed: `run` steps the pinned clock and
+ * rasterizes render() at each tick, `hold` parks on a settled state for a
+ * while, and consecutive identical frames fold into one longer delay — a
+ * 2 s hold is one frame, not fifty. `base` supplies the backdrop under the
+ * elements (the history chart's painted frame, which on the device is an
+ * uploaded asset). `hero` is the settled frame that doubles as the APNG's
+ * default image, i.e. what a non-animating viewer shows.
+ */
+class Director {
+  readonly takes: { fb: Uint8Array; delayMs: number }[] = [];
+  refreshing = false;
+  base: () => Uint8Array | undefined = () => undefined;
+  hero: Uint8Array | null = null;
+
+  constructor(
+    private readonly module: MonitorModule,
+    private readonly fonts: Record<string, Font>
+  ) {}
+
+  private snap(delayMs: number): Uint8Array {
+    const fb = rasterize(this.module.render({ refreshing: this.refreshing }), this.fonts, this.base());
+    const last = this.takes.at(-1);
+    if (last && Buffer.compare(last.fb, fb) === 0) last.delayMs += delayMs;
+    else this.takes.push({ fb, delayMs });
+    return fb;
+  }
+
+  /** Let `ms` of animation play, sampling every tick. */
+  run(ms: number): void {
+    let remaining = ms;
+    while (remaining > 0) {
+      const step = Math.min(TICK_MS, remaining);
+      this.snap(step);
+      clock += step;
+      remaining -= step;
+    }
+  }
+
+  /** Park on the current (settled) state. */
+  hold(ms: number, options: { hero?: boolean } = {}): void {
+    const fb = this.snap(ms);
+    if (options.hero) this.hero = fb;
+    clock += ms;
+  }
+
+  /** The refresh indicator: dots on, the fetch, dots off. The host floors a
+   * fast fetch's indicator so it registers; here the floor is the whole story. */
+  async refresh(ms: number, poll: () => Promise<unknown>): Promise<void> {
+    this.refreshing = true;
+    this.run(ms);
+    await poll();
+    this.refreshing = false;
+  }
+}
+
+/** A sweep and its cooling head; the settle-time to wait after any change. */
+const SWEEP_MS = 500 + 160 + 50;
+
+// ---------------------------------------------------------------- stories --
+
+interface Shot {
+  frames: { rgb: Uint8Array; delayMs: number }[];
+  still: Uint8Array;
+}
+
+function film(director: Director): Shot {
+  if (!director.hero) throw new Error('story ended without a hero frame');
+  // Glow-render each distinct 1× frame once; identical framebuffers share
+  // one raster (holds and revisited states are common).
+  const cache = new Map<string, Uint8Array>();
+  const glow = (fb: Uint8Array): Uint8Array => {
+    const key = Buffer.from(fb).toString('base64');
+    let rgb = cache.get(key);
+    if (!rgb) {
+      rgb = renderGlow(fb, CELL).rgb;
+      cache.set(key, rgb);
+    }
+    return rgb;
+  };
+  return {
+    frames: director.takes.map((t) => ({ rgb: glow(t.fb), delayMs: t.delayMs })),
+    still: glow(director.hero),
+  };
+}
+
+export async function stories(fonts: Record<string, Font>): Promise<Record<string, Shot>> {
+  installClock();
+  const shots: Record<string, Shot> = {};
 
   // Claude limits — one fixture serving both modules: 5H 67% amber and over
   // pace, 7D 42% green, FABLE 88% red, so the dashboard shows every severity.
@@ -471,12 +573,50 @@ async function generate(fonts: Record<string, Font>): Promise<void> {
   const usageOptions = {
     pollIntervalMs: 600_000,
     refreshCooldownMs: 5_000,
-    sweepMs: 0, // settled values, not the first frame of the arrival sweep
-    sweepCoolMs: 0,
     fetchUsageImpl: async () => usage,
   };
-  shots['gauge'] = await renderModule(claudeGaugeModule({ ...usageOptions, cachePath: null }), fonts);
-  shots['dash'] = await renderModule(claudeDashModule({ ...usageOptions, quiet: true, persist: false }), fonts);
+
+  // Gauge: the startup reveal, a refresh (dots in place of the countdown),
+  // then the dial walks the windows — 7D green, FABLE red. The loop rewinds
+  // to the blank panel, so the next reveal reads as coming home; no return
+  // sweep needed (each sweep costs about a still's worth of bytes).
+  {
+    const gauge = claudeGaugeModule({ ...usageOptions, cachePath: null });
+    const d = new Director(gauge, fonts);
+    gauge.init?.(nullContext());
+    d.hold(TICK_MS); // the blank panel — where the loop rewinds to
+    await gauge.poll();
+    d.run(SWEEP_MS);
+    d.hold(1600);
+    await d.refresh(500, () => gauge.poll());
+    d.hold(2000, { hero: true });
+    for (const dwell of [1600, 2200]) {
+      gauge.onEncoder?.(1);
+      d.run(SWEEP_MS);
+      d.hold(dwell);
+    }
+    shots['gauge'] = film(d);
+  }
+
+  // Dash: reveal, refresh, then the selection walks the three bars — the
+  // number rolls, the marker jumps, the bars keep their own truth.
+  {
+    const dash = claudeDashModule({ ...usageOptions, quiet: true, persist: false });
+    const d = new Director(dash, fonts);
+    dash.init?.(nullContext());
+    d.hold(TICK_MS);
+    await dash.poll();
+    d.run(SWEEP_MS);
+    d.hold(1600);
+    await d.refresh(500, () => dash.poll());
+    d.hold(2000, { hero: true });
+    for (const dwell of [1600, 2200]) {
+      dash.onEncoder?.(1);
+      d.run(SWEEP_MS);
+      d.hold(dwell);
+    }
+    shots['dash'] = film(d);
+  }
 
   // History — ~5 months with a weekday rhythm, the model mix drifting from
   // sonnet-heavy to fable-heavy, occasional spike days and skipped days.
@@ -508,8 +648,9 @@ async function generate(fonts: Record<string, Font>): Promise<void> {
     }
   }
   // Drive the real module (label, total, and age text live in its render(),
-  // not in the painted chart); the painted frames stand in for the uploaded
-  // asset the chart element references.
+  // not in the painted chart); the intro frames — the same generators that
+  // build the uploaded asset — stand in for the chart element, played at
+  // their native 30 fps against the director's clock.
   const statsDir = mkdtempSync(join(tmpdir(), 'readme-shots-'));
   try {
     const statsPath = join(statsDir, 'stats-cache.json');
@@ -525,64 +666,219 @@ async function generate(fonts: Record<string, Font>): Promise<void> {
       todayImpl: () => days.at(-1)!.date, // fresh data: the age mark stays hidden
       uploadImpl: async () => {},
       scheduleImpl: () => () => {}, // no timers to keep the process alive
-      intros: false,
+      intros: false, // render() falls through to the static chart; the director plays the intro
     });
     history.init?.(nullContext());
     await history.poll();
-    const bars = SCREENS.find((s) => s.days === 30) ?? SCREENS[0]!;
-    shots['history-30d'] = rasterize(history.render({ refreshing: false }), fonts, paintBars(windowDays(days, bars.days), bars));
-    history.onEncoder?.(2); // 30D -> 7D -> ALL
-    shots['history-heatmap'] = rasterize(history.render({ refreshing: false }), fonts, paintHeatmap(days));
+
+    const playIntro = (d: Director, frames: Uint8Array[]): void => {
+      const startedAt = clock;
+      d.base = () => frames[Math.min(frames.length - 1, Math.floor(((clock - startedAt) / 1000) * HISTORY_FPS))];
+      d.run((frames.length / HISTORY_FPS) * 1000);
+    };
+    const barScreen = (count: number) => {
+      const screen = SCREENS.find((s) => s.kind === 'bars' && s.days === count);
+      if (!screen) throw new Error(`no ${count}-day bar screen`);
+      return screen;
+    };
+
+    // 30D: bars rise, dwell; the dial turns to 7D, bars rise, dwell — and the
+    // loop's rewind reads as the dial turning back.
+    {
+      const d = new Director(history, fonts);
+      const thirty = barScreen(30);
+      playIntro(d, introBarsFrames(windowDays(days, thirty.days), thirty));
+      d.base = () => paintBars(windowDays(days, thirty.days), thirty);
+      d.hold(2200, { hero: true });
+      history.onEncoder?.(1);
+      const seven = barScreen(7);
+      playIntro(d, introBarsFrames(windowDays(days, seven.days), seven));
+      d.base = () => paintBars(windowDays(days, seven.days), seven);
+      d.hold(2200);
+      shots['history-30d'] = film(d);
+    }
+    // ALL: the calendar sweeps in and dwells.
+    {
+      history.onEncoder?.(1); // 7D -> ALL
+      const d = new Director(history, fonts);
+      playIntro(d, introHeatFrames(days));
+      d.base = () => paintHeatmap(days);
+      d.hold(3000, { hero: true });
+      shots['history-heatmap'] = film(d);
+    }
   } finally {
     rmSync(statsDir, { recursive: true, force: true });
   }
 
-  // Grok weekly — 38%, 4 days 8 hours to the weekly reset.
-  const grok: GrokWeeklyUsage = {
-    usedPercent: 38,
-    remainingPercent: 62,
-    periodStart: hours(-(2 * 24 + 16)),
-    resetsAt: hours(4 * 24 + 8.2),
-    periodType: 'USAGE_PERIOD_TYPE_WEEKLY',
-    fetchedAt: new Date(),
-  };
-  shots['grok'] = await renderModule(
-    grokGaugeModule({
+  // Grok weekly — 38%, 4 days 8 hours to the weekly reset: reveal, refresh.
+  {
+    const grokUsage: GrokWeeklyUsage = {
+      usedPercent: 38,
+      remainingPercent: 62,
+      periodStart: hours(-(2 * 24 + 16)),
+      resetsAt: hours(4 * 24 + 8.2),
+      periodType: 'USAGE_PERIOD_TYPE_WEEKLY',
+      fetchedAt: new Date(),
+    };
+    const grok = grokGaugeModule({
       pollIntervalMs: 600_000,
       refreshCooldownMs: 5_000,
-      sweepMs: 0,
-      sweepCoolMs: 0,
       cachePath: null,
-      fetchUsageImpl: async () => grok,
-    }),
-    fonts
-  );
-
-  // CPU — 5.2 load on 10 cores: 52% one-minute pressure, amber.
-  shots['cpu'] = await renderModule(cpuModule({ sweepMs: 0, sweepCoolMs: 0, cores: 10, loadavg: () => [5.2, 3.8, 2.9] }), fonts);
-
-  for (const [name, fb] of Object.entries(shots)) {
-    const { rgb, width, height } = renderGlow(fb);
-    await Bun.write(join(OUT_DIR, `${name}.png`), encodePng(rgb, width, height, 1));
-    console.log(`wrote docs/img/${name}.png`);
+      fetchUsageImpl: async () => grokUsage,
+    });
+    const d = new Director(grok, fonts);
+    grok.init?.(nullContext());
+    d.hold(TICK_MS);
+    await grok.poll();
+    d.run(SWEEP_MS);
+    d.hold(1800);
+    await d.refresh(500, () => grok.poll());
+    d.hold(2600, { hero: true });
+    shots['grok'] = film(d);
   }
+
+  // CPU — 10 cores, 5.2 on the minute: 52%, amber. The load moves (a poll
+  // brings 6.1), then the dial walks the 5- and 15-minute windows.
+  {
+    let loads = [5.2, 3.8, 2.9];
+    const cpu = cpuModule({ cores: 10, loadavg: () => loads });
+    const d = new Director(cpu, fonts);
+    cpu.init?.(nullContext());
+    d.hold(TICK_MS);
+    await cpu.poll();
+    d.run(SWEEP_MS);
+    d.hold(2000, { hero: true });
+    loads = [6.1, 3.8, 2.9];
+    await cpu.poll();
+    d.run(SWEEP_MS);
+    d.hold(1600);
+    for (const dwell of [1600, 2200]) {
+      cpu.onEncoder?.(1);
+      d.run(SWEEP_MS);
+      d.hold(dwell);
+    }
+    shots['cpu'] = film(d);
+  }
+
+  return shots;
+}
+
+// ------------------------------------------------------------ the fonts --
+
+/** busybar-firmware revision the fonts are read from. Pinned so a render is
+ * reproducible; bump deliberately when the firmware's fonts change (the
+ * device's rendering changes with them). */
+const FIRMWARE_REV = 'a3e9269427a1e45cb61d57fb01ace693c26a02e6';
+const FONT_FILES = { small: 'busy_regular_5.font', normal: 'busy_regular_7.font' } as const;
+
+/** With no checkout given, the two font files (2 KB each) are fetched from
+ * GitHub at FIRMWARE_REV into ~/.cache/mbar/fonts and reused from there. */
+export async function loadFonts(fwPath?: string): Promise<Record<string, Font>> {
+  const load = async (name: string): Promise<Font> => {
+    if (fwPath) {
+      const path = join(fwPath, 'assets/shared/fonts', name);
+      const file = Bun.file(path);
+      if (!(await file.exists())) throw new Error(`${path} not found — is --fw a busybar-firmware checkout?`);
+      return parseBinfont(Buffer.from(await file.arrayBuffer()));
+    }
+    const cachedPath = join(homedir(), '.cache', 'mbar', 'fonts', FIRMWARE_REV.slice(0, 12), name);
+    if (!(await Bun.file(cachedPath).exists())) {
+      const url = `https://raw.githubusercontent.com/busy-app/busybar-firmware/${FIRMWARE_REV}/assets/shared/fonts/${name}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`fetching ${url}: HTTP ${res.status}`);
+      await Bun.write(cachedPath, await res.arrayBuffer());
+      console.log(`fetched ${name} -> ${cachedPath}`);
+    }
+    // A fresh handle: a BunFile opened before the write reads back empty.
+    return parseBinfont(Buffer.from(await Bun.file(cachedPath).arrayBuffer()));
+  };
+  return { small: await load(FONT_FILES.small), normal: await load(FONT_FILES.normal) };
+}
+
+// ------------------------------------------------------------------ CLI --
+
+function encodeShots(shots: Record<string, Shot>): Record<string, Buffer> {
+  const out: Record<string, Buffer> = {};
+  for (const [name, shot] of Object.entries(shots)) {
+    const { width, height } = renderGlow(new Uint8Array(W * H * 3), CELL);
+    out[name] = encodeApng(shot.frames, width, height, { still: shot.still });
+  }
+  return out;
+}
+
+async function generate(fonts: Record<string, Font>, outDir: string, html: boolean): Promise<void> {
+  const shots = await stories(fonts);
+  const encoded = encodeShots(shots);
+  for (const [name, png] of Object.entries(encoded)) {
+    await Bun.write(join(outDir, `${name}.png`), png);
+    const seconds = shots[name]!.frames.reduce((a, f) => a + f.delayMs, 0) / 1000;
+    console.log(
+      `wrote ${join(outDir, `${name}.png`)}: ${(png.length / 1024).toFixed(0)} KB, ${shots[name]!.frames.length} frames, ${seconds.toFixed(1)} s loop`
+    );
+  }
+  if (html) {
+    const rows = Object.entries(encoded)
+      .map(([name, png]) => `<figure><img src="${name}.png" alt="${name}"><figcaption>${name}.png — ${(png.length / 1024).toFixed(0)} KB</figcaption></figure>`)
+      .join('\n');
+    await Bun.write(
+      join(outDir, 'index.html'),
+      `<!doctype html><meta charset="utf-8"><title>readme shots</title>
+<style>body{background:#111;color:#ccc;font:14px system-ui;padding:24px}figure{margin:0 0 28px}img{max-width:100%;display:block}figcaption{margin-top:6px;color:#888}</style>
+${rows}`
+    );
+    console.log(`wrote ${join(outDir, 'index.html')}`);
+  }
+}
+
+/** Renders everything to memory and compares against docs/img, byte for
+ * byte; the pinned clock makes an unchanged render an identical file. Exit
+ * 1 lists what is stale — the release gate. */
+async function check(fonts: Record<string, Font>): Promise<number> {
+  const encoded = encodeShots(await stories(fonts));
+  const stale: string[] = [];
+  for (const [name, png] of Object.entries(encoded)) {
+    const file = Bun.file(join(OUT_DIR, `${name}.png`));
+    const same = (await file.exists()) && Buffer.compare(Buffer.from(await file.arrayBuffer()), png) === 0;
+    if (!same) stale.push(`${name}.png`);
+  }
+  if (stale.length === 0) {
+    console.log('docs/img is up to date');
+    return 0;
+  }
+  console.error(`stale README shots: ${stale.join(', ')} — run: bun run tools/readme-shots.ts generate`);
+  return 1;
 }
 
 if (import.meta.main) {
   const argv = process.argv.slice(2);
-  let fwPath = process.env['MBAR_FW'];
-  const fwFlag = argv.indexOf('--fw');
-  if (fwFlag !== -1) {
-    fwPath = argv[fwFlag + 1];
-    argv.splice(fwFlag, 2);
+  const flag = (name: string): string | undefined => {
+    const i = argv.indexOf(name);
+    if (i === -1) return undefined;
+    const [, value] = argv.splice(i, 2);
+    return value;
+  };
+  const fwPath = flag('--fw') ?? process.env['MBAR_FW'];
+  const preview = flag('--preview');
+  const cell = flag('--cell');
+  const tick = flag('--tick');
+  if (cell) CELL = Number(cell);
+  if (tick) TICK_MS = Number(tick);
+  if (!(CELL >= 4 && CELL <= 24) || !(TICK_MS >= 20 && TICK_MS <= 200) || !Number.isInteger(TICK_MS)) {
+    console.error('--cell must be 4..24 and --tick an integer 20..200 (ms)');
+    process.exit(1);
   }
   const [mode, baseline] = argv;
-  if (!fwPath || (mode !== 'generate' && mode !== 'validate') || (mode === 'validate' && !baseline)) {
-    console.error('usage: bun run tools/readme-shots.ts generate|validate <real-gauge.png> [--fw <busybar-firmware>]');
-    console.error('       (--fw defaults to MBAR_FW; see the header for the validate baseline)');
+  if ((mode !== 'generate' && mode !== 'check' && mode !== 'validate') || (mode === 'validate' && !baseline)) {
+    console.error('usage: bun run tools/readme-shots.ts generate [--preview <dir>] | check | validate <real-gauge.png>');
+    console.error('       [--fw <busybar-firmware checkout>] (default: fonts fetched from GitHub, cached)');
+    console.error('       [--cell <px per LED, 10>] [--tick <ms per frame, 50>] (bench knobs; the defaults are what ships)');
     process.exit(1);
   }
   const fonts = await loadFonts(fwPath);
-  if (mode === 'generate') await generate(fonts);
-  else process.exit((await validate(baseline!, fonts)) === 0 ? 0 : 1);
+  let code = 0;
+  if (mode === 'generate') await generate(fonts, preview ?? OUT_DIR, preview !== undefined);
+  else if (mode === 'check') code = await check(fonts);
+  else code = (await validate(baseline!, fonts)) === 0 ? 0 : 1;
+  // The modules' sweep tickers are real timers; the story is over.
+  process.exit(code);
 }

@@ -129,7 +129,8 @@ export const ASSET_FILE = 'mbar-history.anim';
  * on arrival and bar tips while growing are mixed FLASH_MIX toward white,
  * settling to their final colour over FLASH_DECAY frames. Tuned on-device
  * (2026-08-09) via tools/history-intro.ts. */
-const FPS = 30;
+export const INTRO_FPS = 30;
+const FPS = INTRO_FPS;
 const TRACK_WIPE = 3;
 const INTRO_LEAD = 2;
 const HEAT_LEAD = 1;

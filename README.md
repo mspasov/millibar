@@ -13,10 +13,12 @@ press `START` to refresh, with the status light fading cyan while it fetches.
 
 ## What it looks like
 
-Rendered mockups with showcase data, not captures: `tools/readme-shots.ts` runs each
-module's real `render()` on fixture data and rasterizes the elements with the
-firmware's own fonts — the rasterizer reproduces a real `/api/screen` capture
-pixel-for-pixel (its `validate` mode) — then draws the 72×16 frame as an LED panel.
+Rendered loops with showcase data, not captures: `tools/readme-shots.ts` drives each
+module's real `render()` on fixture data along a scripted timeline (the startup sweep,
+a refresh, the dial turning), rasterizes every frame with the firmware's own fonts —
+the rasterizer reproduces a real `/api/screen` capture pixel-for-pixel (its `validate`
+mode) — and draws the 72×16 frames as an LED panel in a looping APNG. Anything that
+doesn't animate shows the settled frame.
 
 **Claude gauge** — one limit window at a time: label, countdown to the window's reset,
 percentage, and the severity-coloured bar. The notch is the pace tick, marking how much
@@ -95,7 +97,7 @@ it hangs or errors, see [Troubleshooting](#troubleshooting).
 | `bun run tools/chime.ts [freqs-hz...]` | Synthesizes a chime, uploads it, and plays it on the speaker. |
 | `bun run tools/click.ts [--once]` | Clicks the speaker whenever the rotary dial moves. |
 | `bun run tools/screenshot.ts [out.png] [front\|back] [scale]` | Captures a display to PNG. |
-| `bun run tools/readme-shots.ts generate\|validate [--fw <path>]` | Regenerates the README's screen mockups — the modules' real `render()` on showcase data, rasterized with the firmware's fonts (a `busybar-firmware` checkout supplies them), no device needed. `validate` diffs the rasterizer against a real capture. |
+| `bun run tools/readme-shots.ts generate\|check\|validate` | Regenerates the README's screen loops — the modules' real `render()` on showcase data, filmed over a scripted timeline and rasterized with the firmware's fonts (fetched from a pinned firmware revision; `--fw <checkout>` to use a local one), no device needed. Deterministic: `check` exits 1 if `docs/img` no longer matches what the code renders. `validate` diffs the rasterizer against a real capture. |
 | `mbar probe\|routes\|show\|init\|set\|rm\|order` | **Connection config.** Manages the persistent route list (USB / LAN / cloud, with credentials) and probes which route answers. `--route <names>` forces a run onto specific routes. See [Connecting](#connecting-to-the-device). |
 | `mbar api <cmd>` | **Storage CLI.** Browse and manage the device's 7 GB `/ext` partition and per-app assets: `ls`/`df`/`cat`/`get`/`put`/`mv`/`mkdir`/`rm`, plus `apps`/`push`/`wipe` for asset directories. `mbar api help` for the full list. |
 
