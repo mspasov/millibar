@@ -134,8 +134,13 @@ export function saveDeviceConfig(cfg: DeviceConfig): string {
   const path = configPath();
   validateConfig(cfg);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  writeFileSync(path, `${JSON.stringify(cfg, null, 2)}\n`);
-  // The file may hold the cloud token or the device password.
+  // The file may hold the cloud token or the device password, so it must
+  // never exist world-readable, even between two calls: mode on the write
+  // covers creation (write-then-chmod left a umask-mode window, real when
+  // MBAR_CONFIG points outside the 0700 default directory), and the chmod
+  // covers overwrites, where writeFileSync ignores mode — it also repairs a
+  // file created before this guard.
+  writeFileSync(path, `${JSON.stringify(cfg, null, 2)}\n`, { mode: 0o600 });
   chmodSync(path, 0o600);
   return path;
 }
