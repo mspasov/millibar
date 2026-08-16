@@ -135,7 +135,10 @@ describe('ModuleRunner', () => {
     await run;
   });
 
-  test('requestRefresh while a poll is in flight is a no-op', async () => {
+  test('requestRefresh while a poll is in flight repaints without a second poll', async () => {
+    // The repaint is the point: START during a fetch (or the 300 ms
+    // indicator floor) may be someone recovering a BACK-blanked screen, and
+    // a silent return left them staring at black until the next heartbeat.
     let release: (() => void) | null = null;
     const fake = fakeModule(() => ({ nextPollMs: 60_000, holdRefreshMs: 0 }));
     const slowModule: MonitorModule = {
@@ -154,8 +157,8 @@ describe('ModuleRunner', () => {
     await sleep(20); // poll is now blocked in flight
     const updatesBefore = updates;
     runner.requestRefresh('test');
-    expect(updates).toBe(updatesBefore); // neither repaint nor second poll
-    expect(fake.pollCount).toBe(1);
+    expect(updates).toBe(updatesBefore + 1); // a repaint…
+    expect(fake.pollCount).toBe(1); // …but no second poll
 
     release!();
     controller.abort();

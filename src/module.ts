@@ -166,9 +166,11 @@ export class ModuleRunner {
     }
   }
 
-  /** Poll early on user demand — or, inside the hold window, just repaint:
-   * the press may well be someone reacting to a blank screen (BACK dismissed
-   * the canvas, or another app drew over it), and doing nothing looks broken. */
+  /** Poll early on user demand — or, when a fetch is refused (hold window,
+   * or one already in flight), just repaint: the press may well be someone
+   * reacting to a blank screen (BACK dismissed the canvas, or another app
+   * drew over it), and doing nothing looks broken. Every path ends in
+   * onUpdated() for exactly that reason. */
   requestRefresh(reason: string): void {
     const waitMs = this.holdUntil - Date.now();
     if (waitMs > 0) {
@@ -176,7 +178,12 @@ export class ModuleRunner {
       this.onUpdated();
       return;
     }
-    if (!this.wake) return; // already polling
+    if (!this.wake) {
+      // Already polling: the refresh they asked for is effectively underway,
+      // but the screen must still come back now, not when the fetch lands.
+      this.onUpdated();
+      return;
+    }
     this.log(`${reason}: refreshing`);
     this.wake();
   }
