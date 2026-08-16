@@ -517,7 +517,7 @@ export function encodeHistoryAsset(days: DayTokens[]): HistoryAsset {
 
 export interface ClaudeHistoryOptions {
   /** False disables the appearance intros — every screen draws its static
-   * section directly (mbar's ANIMATIONS switch). Playback-only: the asset
+   * section directly (the MBAR_ANIMATIONS switch). Playback-only: the asset
    * still carries the intro sections, so the encoder and the upload path
    * don't fork on a display preference. */
   intros?: boolean;

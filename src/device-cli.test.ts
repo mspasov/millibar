@@ -6,8 +6,8 @@ import { runDeviceCommand } from './device-cli';
 import { tempDirs } from './test-util';
 
 // Same hygiene as connection.test.ts: never touch the real config or let a
-// leaked BUSY_BAR_ADDR change what candidateRoutes sees.
-const ENV_KEYS = ['MBAR_CONFIG', 'BUSY_BAR_ADDR', 'BUSY_BAR_ROUTE', 'BUSY_BAR_TOKEN', 'BUSY_BAR_PASSWORD', 'XDG_CONFIG_HOME'];
+// leaked MBAR_ADDR change what candidateRoutes sees.
+const ENV_KEYS = ['MBAR_CONFIG', 'MBAR_ADDR', 'MBAR_ROUTE', 'MBAR_TOKEN', 'MBAR_PASSWORD', 'XDG_CONFIG_HOME'];
 const savedEnv: Record<string, string | undefined> = {};
 const { tempDir, cleanup } = tempDirs('mbar-device-cli-');
 
@@ -110,13 +110,13 @@ describe('init', () => {
 
 describe('probe', () => {
   test('exit 0 when a route answers, 1 when none do', async () => {
-    process.env.BUSY_BAR_ADDR = fakeDevice();
+    process.env.MBAR_ADDR = fakeDevice();
     expect(await runDeviceCommand('probe', [])).toBe(0);
 
     const dead = Bun.serve({ port: 0, fetch: () => new Response('') });
     const deadAddr = `127.0.0.1:${dead.port}`;
     dead.stop(true);
-    process.env.BUSY_BAR_ADDR = deadAddr;
+    process.env.MBAR_ADDR = deadAddr;
     expect(await runDeviceCommand('probe', [])).toBe(1);
   });
 });
@@ -145,8 +145,8 @@ describe('mbar entry point', () => {
     const out = result.stdout.toString();
     expect(out).toContain('mbar probe');
     expect(out).toContain('mbar api');
-    expect(out).toContain('BUSY_BAR_ADDR');
-    expect(out).toContain('BUSY_BAR_ROUTE');
+    expect(out).toContain('MBAR_ADDR');
+    expect(out).toContain('MBAR_ROUTE');
   });
 
   test('--route reaches route selection from any argv position', () => {

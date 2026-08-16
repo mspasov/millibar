@@ -1,7 +1,7 @@
 /**
  * Shared configuration parsing for every script in the repo.
  *
- * `BUSY_BAR_ADDR` may be an IP, a hostname, or a full URL — the README
+ * `MBAR_ADDR` may be an IP, a hostname, or a full URL — the README
  * promises all three work everywhere, and busy-lib normalises its own copy —
  * so the raw-fetch clients (display, storage, input, screenshot) must resolve
  * it through one helper instead of blindly prefixing a scheme.
@@ -24,7 +24,7 @@ export const DEFAULT_APP_NAME = 'mbar';
 /** The configured device address, verbatim — for busy-lib, which normalises
  * schemes itself, and for log lines. */
 export function deviceAddr(explicit?: string): string {
-  return explicit ?? process.env.BUSY_BAR_ADDR ?? DEFAULT_ADDR;
+  return explicit ?? process.env.MBAR_ADDR ?? DEFAULT_ADDR;
 }
 
 /** The cloud proxy hosts, per busy-lib's PROXY_HOST_RE. The proxy is not
@@ -58,7 +58,7 @@ export function wsBase(addr = deviceAddr()): string {
 }
 
 /** Boolean env var, or `fallback` when unset/empty. Accepts 1/0, true/false,
- * on/off (any case); anything else throws — `ANIMATIONS=flase` silently
+ * on/off (any case); anything else throws — `MBAR_ANIMATIONS=flase` silently
  * meaning "on" would be a setting that looks applied and isn't. */
 export function envFlag(name: string, fallback: boolean): boolean {
   const raw = process.env[name];

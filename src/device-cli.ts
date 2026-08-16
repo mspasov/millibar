@@ -42,7 +42,7 @@ Monitor (the default — no arguments):
   --no-animations        still everything that moves: value changes snap
                          instead of sweeping, history screens skip their
                          intros, quitting skips the turn-off farewell.
-                         Equivalent to ANIMATIONS=off; the flag wins
+                         Equivalent to MBAR_ANIMATIONS=off; the flag wins
                          (--animations overrides an inherited off).
 
 Connection routes (config: ${configPath()}):
@@ -60,7 +60,7 @@ device wins. 'set' adds or updates a route (--first puts it at the top).
 --route <name[,name...]> on any invocation forces this run to just the named
 route(s), in that order, still probed — 'mbar --route cloud' runs the monitor
 over the proxy, 'mbar probe --route cloud,lan' probes those two. Equivalent
-to BUSY_BAR_ROUTE; the flag wins.
+to MBAR_ROUTE; the flag wins.
 Credentials: --token is a cloud API token (https://cloud.busy.app/api-tokens,
 for the https://api.busy.app route — create it with the "BUSY Bar" scope, an
 Account-scope token 403s); --password is the device's HTTP Access Password if
@@ -74,15 +74,16 @@ Device storage (mbar api):
 
 Environment:
 
-  BUSY_BAR_ADDR          bypass the route config — exact address, unprobed
-                         (wins over BUSY_BAR_ROUTE/--route)
-  BUSY_BAR_ROUTE         force these config route(s), comma-separated — what
+  MBAR_ADDR              bypass the route config — exact address, unprobed
+                         (wins over MBAR_ROUTE/--route)
+  MBAR_ROUTE             force these config route(s), comma-separated — what
                          --route sets; honoured by every script in the repo
-  BUSY_BAR_TOKEN         cloud token for routes that don't carry their own
-  BUSY_BAR_PASSWORD      HTTP Access Password, likewise
+  MBAR_TOKEN             cloud token for routes that don't carry their own
+  MBAR_PASSWORD          HTTP Access Password, likewise
   MBAR_CONFIG            route config path
-  POLL_INTERVAL_MS, REFRESH_COOLDOWN_MS, BUSY_PRIORITY, SWITCH_BUTTON,
-  ANIMATIONS             monitor tuning — see README (ANIMATIONS is what
+  MBAR_POLL_INTERVAL_MS, MBAR_REFRESH_COOLDOWN_MS, MBAR_PRIORITY,
+  MBAR_SWITCH_BUTTON, MBAR_ANIMATIONS
+                         monitor tuning — see README (MBAR_ANIMATIONS is what
                          --[no-]animations sets)`;
 }
 
@@ -97,9 +98,9 @@ function describeRoute(route: Route): string {
 
 async function probeAll(): Promise<number> {
   const routes = candidateRoutes();
-  const forced = !process.env.BUSY_BAR_ADDR && process.env.BUSY_BAR_ROUTE;
+  const forced = !process.env.MBAR_ADDR && process.env.MBAR_ROUTE;
   console.log(
-    `config: ${process.env.BUSY_BAR_ADDR ? 'BUSY_BAR_ADDR override' : fileNote()}${forced ? ` — forced to ${forced}` : ''}`
+    `config: ${process.env.MBAR_ADDR ? 'MBAR_ADDR override' : fileNote()}${forced ? ` — forced to ${forced}` : ''}`
   );
   let winner: string | undefined;
   for (const route of routes) {

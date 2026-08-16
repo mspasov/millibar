@@ -48,7 +48,7 @@ export interface HostOptions {
   /** Which button the dial press reports as. */
   switchButton?: Button;
   /** false stills the quit-confirm drain and skips the turn-off farewell
-   * (mbar's ANIMATIONS switch). */
+   * (the MBAR_ANIMATIONS switch). */
   animations?: boolean;
   /** Aborting stops the host exactly as SIGINT does (no farewell). A seam for
    * tests and embedders — mbar itself quits via signals and double-BACK. */
@@ -61,11 +61,11 @@ export interface HostOptions {
 }
 
 function envSwitchButton(): Button | undefined {
-  const value = process.env.SWITCH_BUTTON;
+  const value = process.env.MBAR_SWITCH_BUTTON;
   if (!value) return undefined;
   const button = value.toUpperCase() as Button;
   if (!BUTTONS.includes(button)) {
-    throw new Error(`SWITCH_BUTTON must be one of ${BUTTONS.join(', ')}, got '${value}'`);
+    throw new Error(`MBAR_SWITCH_BUTTON must be one of ${BUTTONS.join(', ')}, got '${value}'`);
   }
   return button;
 }
@@ -73,7 +73,7 @@ function envSwitchButton(): Button | undefined {
 export async function runHost(modules: MonitorModule[], options: HostOptions = {}): Promise<void> {
   if (modules.length === 0) throw new Error('runHost needs at least one module');
   const applicationName = options.applicationName ?? DEFAULT_APP_NAME;
-  const priority = options.priority ?? envNumber('BUSY_PRIORITY', 50, 1);
+  const priority = options.priority ?? envNumber('MBAR_PRIORITY', 50, 1);
   const heartbeatMs = options.heartbeatMs ?? 60_000;
   const switchButton = options.switchButton ?? envSwitchButton() ?? 'OK';
 
@@ -249,7 +249,7 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
       } else if (event.button === 'START') {
         active().requestRefresh('START pressed');
       } else if (event.button === 'BACK') {
-        // Unreachable when SWITCH_BUTTON=BACK claims the button above — the
+        // Unreachable when MBAR_SWITCH_BUTTON=BACK claims the button above — the
         // remap keeps module cycling and gives up on-device quitting.
         quit.arm();
       } else {

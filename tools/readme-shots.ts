@@ -10,7 +10,7 @@
  *
  * The firmware checkout supplies the fonts (assets/shared/fonts/*.font):
  *   git clone --depth 1 https://github.com/busy-app/busybar-firmware
- * The path can also come from BUSYBAR_FW.
+ * The path can also come from MBAR_FW.
  *
  * Fidelity rests on porting the firmware's exact text semantics — see
  * DEVICE.md, "Text element fonts". `validate` proves the port: it renders
@@ -377,7 +377,7 @@ async function loadFonts(fwPath: string): Promise<Record<string, Font>> {
     const file = Bun.file(join(dir, name));
     if (!(await file.exists())) {
       throw new Error(
-        `${join(dir, name)} not found — pass --fw (or set BUSYBAR_FW) to a checkout of\n` +
+        `${join(dir, name)} not found — pass --fw (or set MBAR_FW) to a checkout of\n` +
           `  git clone --depth 1 https://github.com/busy-app/busybar-firmware`
       );
     }
@@ -570,7 +570,7 @@ async function generate(fonts: Record<string, Font>): Promise<void> {
 
 if (import.meta.main) {
   const argv = process.argv.slice(2);
-  let fwPath = process.env['BUSYBAR_FW'];
+  let fwPath = process.env['MBAR_FW'];
   const fwFlag = argv.indexOf('--fw');
   if (fwFlag !== -1) {
     fwPath = argv[fwFlag + 1];
@@ -579,7 +579,7 @@ if (import.meta.main) {
   const [mode, baseline] = argv;
   if (!fwPath || (mode !== 'generate' && mode !== 'validate') || (mode === 'validate' && !baseline)) {
     console.error('usage: bun run tools/readme-shots.ts generate|validate <real-gauge.png> [--fw <busybar-firmware>]');
-    console.error('       (--fw defaults to BUSYBAR_FW; see the header for the validate baseline)');
+    console.error('       (--fw defaults to MBAR_FW; see the header for the validate baseline)');
     process.exit(1);
   }
   const fonts = await loadFonts(fwPath);

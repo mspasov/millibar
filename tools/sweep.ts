@@ -16,11 +16,11 @@
  *   bun run tools/sweep.ts                # interactive: type targets on stdin
  *   bun run tools/sweep.ts --demo         # random targets until Ctrl-C
  * Flags: --duration <ms> (sweep length, default 500; interactive: 'd 800')
- * Env: BUSY_BAR_ADDR, BUSY_PRIORITY
+ * Env: MBAR_ADDR, MBAR_PRIORITY
  *
  * If the millibar host is running it holds the display at priority 50, and the
  * device rejects same-priority draws from a different application_name — run
- * with BUSY_PRIORITY=51 to draw over it. Exiting clears this app's elements;
+ * with MBAR_PRIORITY=51 to draw over it. Exiting clears this app's elements;
  * mbar will not repaint on its own until a button press or its next heartbeat.
  */
 import { envNumber } from '../src/config';
@@ -55,7 +55,7 @@ const PAUSE_MS = 700;
 
 const WHITE = '#FFFFFFFF';
 const APP_NAME = 'sweep_test';
-const PRIORITY = envNumber('BUSY_PRIORITY', 50, 1);
+const PRIORITY = envNumber('MBAR_PRIORITY', 50, 1);
 /** Refreshed by every draw; the screen self-clears if the process dies. */
 const DRAW_TIMEOUT_S = 60;
 const KEEPALIVE_MS = 20_000;

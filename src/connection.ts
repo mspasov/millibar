@@ -10,10 +10,10 @@
  * unplugged mid-run → LAN → cloud) without a restart.
  *
  * Config lives at `~/.config/mbar/config.json` (`MBAR_CONFIG` or
- * `XDG_CONFIG_HOME` move it). `BUSY_BAR_ROUTE` (or `mbar --route`) narrows
+ * `XDG_CONFIG_HOME` move it). `MBAR_ROUTE` (or `mbar --route`) narrows
  * selection to the named config routes, in the given order — still probed,
  * so a forced-but-dead route fails loudly instead of hanging draws.
- * `BUSY_BAR_ADDR` still overrides everything — including `BUSY_BAR_ROUTE` —
+ * `MBAR_ADDR` still overrides everything — including `MBAR_ROUTE` —
  * and is trusted verbatim *without* probing; that keeps echo-server
  * debugging and the wire-level tests, which point it at fakes that don't
  * serve `/api/version`, working unchanged.
@@ -42,7 +42,7 @@ import { apiPath, DEFAULT_ADDR, httpBase } from './config';
 export interface Route {
   /** Short label, e.g. 'usb', 'lan', 'cloud'. Unique within the config. */
   name: string;
-  /** IP, hostname, or full URL — same forms BUSY_BAR_ADDR accepts. */
+  /** IP, hostname, or full URL — same forms MBAR_ADDR accepts. */
   addr: string;
   /** Cloud API token → `Authorization: Bearer …`. */
   token?: string;
@@ -62,7 +62,7 @@ export interface Connection {
   base: string;
   /** `ws(s)://…` base for the same address. */
   ws: string;
-  /** From the probe reply; '' for the unprobed BUSY_BAR_ADDR route. */
+  /** From the probe reply; '' for the unprobed MBAR_ADDR route. */
   apiSemver: string;
   /** Auth headers every HTTP request to this route must carry. */
   headers: Record<string, string>;
@@ -131,11 +131,11 @@ export function saveDeviceConfig(cfg: DeviceConfig): string {
   return path;
 }
 
-/** `BUSY_BAR_ROUTE='cloud'` or `'cloud,lan'` — the named config routes, in
+/** `MBAR_ROUTE='cloud'` or `'cloud,lan'` — the named config routes, in
  * the given order. A name the config doesn't have is a loud error: a typo'd
  * force silently falling back to usb would defeat the point of forcing. */
 function forcedRoutes(routes: Route[]): Route[] {
-  const forced = process.env.BUSY_BAR_ROUTE;
+  const forced = process.env.MBAR_ROUTE;
   const names = (forced ?? '').split(',').map((n) => n.trim()).filter(Boolean);
   if (names.length === 0) return routes;
   const byName = new Map(routes.map((route) => [route.name, route]));
@@ -143,7 +143,7 @@ function forcedRoutes(routes: Route[]): Route[] {
     const route = byName.get(name);
     if (!route) {
       throw new Error(
-        `BUSY_BAR_ROUTE/--route: no route named '${name}' — config has ${routes.map((r) => r.name).join(', ')}`
+        `MBAR_ROUTE/--route: no route named '${name}' — config has ${routes.map((r) => r.name).join(', ')}`
       );
     }
     return route;
@@ -151,14 +151,14 @@ function forcedRoutes(routes: Route[]): Route[] {
 }
 
 /** The routes a resolve will try, in order — config file plus env overlay.
- * `BUSY_BAR_ROUTE` narrows the list to the named routes (still probed);
- * `BUSY_BAR_ADDR` replaces the whole list with one unprobed route and wins
- * over it; `BUSY_BAR_TOKEN` / `BUSY_BAR_PASSWORD` fill credential gaps
+ * `MBAR_ROUTE` narrows the list to the named routes (still probed);
+ * `MBAR_ADDR` replaces the whole list with one unprobed route and wins
+ * over it; `MBAR_TOKEN` / `MBAR_PASSWORD` fill credential gaps
  * either way. */
 export function candidateRoutes(): Route[] {
-  const token = process.env.BUSY_BAR_TOKEN || undefined;
-  const password = process.env.BUSY_BAR_PASSWORD || undefined;
-  const addr = process.env.BUSY_BAR_ADDR;
+  const token = process.env.MBAR_TOKEN || undefined;
+  const password = process.env.MBAR_PASSWORD || undefined;
+  const addr = process.env.MBAR_ADDR;
   const routes = addr
     ? [{ name: 'env', addr }]
     : forcedRoutes(loadDeviceConfig().routes);
@@ -210,12 +210,12 @@ export async function probeRoute(route: Route): Promise<Connection> {
 let memo: { key: string; promise: Promise<Connection> } | undefined;
 
 /** The memo must not outlive an env change: the test suite (and any caller
- * flipping BUSY_BAR_ADDR between operations) expects the next resolve to see
+ * flipping MBAR_ADDR between operations) expects the next resolve to see
  * the new world, and MBAR_CONFIG moves the file itself. */
 function memoKey(): string {
-  const { BUSY_BAR_ADDR, BUSY_BAR_ROUTE, BUSY_BAR_TOKEN, BUSY_BAR_PASSWORD, MBAR_CONFIG, XDG_CONFIG_HOME } =
+  const { MBAR_ADDR, MBAR_ROUTE, MBAR_TOKEN, MBAR_PASSWORD, MBAR_CONFIG, XDG_CONFIG_HOME } =
     process.env;
-  return [BUSY_BAR_ADDR, BUSY_BAR_ROUTE, BUSY_BAR_TOKEN, BUSY_BAR_PASSWORD, MBAR_CONFIG, XDG_CONFIG_HOME].join('|');
+  return [MBAR_ADDR, MBAR_ROUTE, MBAR_TOKEN, MBAR_PASSWORD, MBAR_CONFIG, XDG_CONFIG_HOME].join('|');
 }
 
 /** Drop the resolved connection so the next call re-probes. Called
@@ -245,7 +245,7 @@ async function resolveFresh(): Promise<Connection> {
   const routes = candidateRoutes();
 
   // The env route is trusted verbatim — no probe. Echo servers and test
-  // fakes don't serve /api/version, and the point of BUSY_BAR_ADDR is "talk
+  // fakes don't serve /api/version, and the point of MBAR_ADDR is "talk
   // to exactly this, now".
   if (routes[0]!.name === 'env') return asConnection(routes[0]!, '');
 
@@ -267,8 +267,8 @@ async function resolveFresh(): Promise<Connection> {
   }
   throw new Error(
     `no BUSY Bar reachable — ${failures.join('; ')}. ` +
-      `Routes come from ${process.env.BUSY_BAR_ADDR ? 'BUSY_BAR_ADDR' : configPath()}` +
-      `${!process.env.BUSY_BAR_ADDR && process.env.BUSY_BAR_ROUTE ? ` (forced to '${process.env.BUSY_BAR_ROUTE}' by BUSY_BAR_ROUTE/--route)` : ''}; ` +
+      `Routes come from ${process.env.MBAR_ADDR ? 'MBAR_ADDR' : configPath()}` +
+      `${!process.env.MBAR_ADDR && process.env.MBAR_ROUTE ? ` (forced to '${process.env.MBAR_ROUTE}' by MBAR_ROUTE/--route)` : ''}; ` +
       `'mbar probe' shows each route's status.`
   );
 }

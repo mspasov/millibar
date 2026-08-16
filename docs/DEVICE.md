@@ -518,7 +518,7 @@ Messages are protobuf-encoded `BSB_State.State` (schemas:
 
 There is **no encoder-press event**: the protobuf defines exactly the three buttons
 above. A physical press of the dial surfaces as `OK` — verified on hardware (pressing
-the dial switches the monitor's modules). The monitor's `SWITCH_BUTTON` env var can
+the dial switches the monitor's modules). The monitor's `MBAR_SWITCH_BUTTON` env var can
 remap it.
 
 `bun run src/input.ts` prints these live; `src/input.ts` also exports `listenInput()` and

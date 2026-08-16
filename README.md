@@ -111,10 +111,10 @@ mbar --help       # full usage, including the monitor and env vars
 
 To force a run onto specific routes without editing the config, name them:
 `mbar --route cloud` runs the monitor over the proxy, `mbar probe --route
-cloud,lan` probes those two in that order. The flag is `BUSY_BAR_ROUTE` in
+cloud,lan` probes those two in that order. The flag is `MBAR_ROUTE` in
 env form, which every script in the repo honours. Forced routes are still
 probed — a dead forced route is a loud error, not a silent fallback — while
-`BUSY_BAR_ADDR` stays the unprobed escape hatch and wins over both.
+`MBAR_ADDR` stays the unprobed escape hatch and wins over both.
 
 Credentials, both optional, per route:
 
@@ -139,17 +139,17 @@ All via environment variables; every one has a working default.
 
 | Variable | Default | Applies to |
 |---|---|---|
-| `BUSY_BAR_ADDR` | unset | bypasses the route config: talk to exactly this IP/hostname/URL, unprobed (wins over `BUSY_BAR_ROUTE`) |
-| `BUSY_BAR_ROUTE` | unset | force selection to these config routes — comma-separated names, tried in that order, still probed. Same as `mbar --route` |
-| `BUSY_BAR_TOKEN` | unset | cloud token for routes that don't carry their own |
-| `BUSY_BAR_PASSWORD` | unset | HTTP Access Password for routes that don't carry their own |
+| `MBAR_ADDR` | unset | bypasses the route config: talk to exactly this IP/hostname/URL, unprobed (wins over `MBAR_ROUTE`) |
+| `MBAR_ROUTE` | unset | force selection to these config routes — comma-separated names, tried in that order, still probed. Same as `mbar --route` |
+| `MBAR_TOKEN` | unset | cloud token for routes that don't carry their own |
+| `MBAR_PASSWORD` | unset | HTTP Access Password for routes that don't carry their own |
 | `MBAR_CONFIG` | `~/.config/mbar/config.json` | where the route config lives |
-| `POLL_INTERVAL_MS` | `600000` (10 min) | monitor — how often the usage API is polled |
-| `REFRESH_COOLDOWN_MS` | `5000` | monitor — floor between button-triggered fetches |
-| `BUSY_PRIORITY` | `50` | monitor — draw priority, 1–100 |
-| `SWITCH_BUTTON` | `OK` | monitor — which button event the dial press reports as (`OK`\|`BACK`\|`START`) |
+| `MBAR_POLL_INTERVAL_MS` | `600000` (10 min) | monitor — how often the usage API is polled |
+| `MBAR_REFRESH_COOLDOWN_MS` | `5000` | monitor — floor between button-triggered fetches |
+| `MBAR_PRIORITY` | `50` | monitor — draw priority, 1–100 |
+| `MBAR_SWITCH_BUTTON` | `OK` | monitor — which button event the dial press reports as (`OK`\|`BACK`\|`START`) |
 | `MBAR_MODULES` | unset (all) | monitor — which modules run and their cycle order, comma-separated (`gauge,dash,history,grok,cpu`); the first named is the startup module. Unset includes `grok` only when a `grok login` exists. Same as `mbar --modules` (the flag wins) |
-| `ANIMATIONS` | `on` | monitor — `off` stills everything that moves: value changes snap instead of sweeping, and the history screens appear without their intros. Same as `mbar --no-animations` (the flag wins) |
+| `MBAR_ANIMATIONS` | `on` | monitor — `off` stills everything that moves: value changes snap instead of sweeping, and the history screens appear without their intros. Same as `mbar --no-animations` (the flag wins) |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | usage — where credentials are read from off-macOS |
 
 ## Modules
@@ -228,7 +228,7 @@ timed standalone with `bun run tools/sweep.ts`, which also reports the frame rat
 device actually sustains.
 
 - **Press the dial** (its press arrives as the `OK` button event — override with
-  `SWITCH_BUTTON` if your press reports differently) to switch to the next module:
+  `MBAR_SWITCH_BUTTON` if your press reports differently) to switch to the next module:
   Claude gauge → Claude dashboard → Claude history → Grok weekly → CPU load → back.
   (The Grok gauge — the SuperGrok weekly credit pool on the same layout — joins the
   cycle only when a `grok login` exists; without one it sits out rather than erroring.)

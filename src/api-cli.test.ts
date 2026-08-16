@@ -5,11 +5,11 @@ import { invalidateConnection } from './connection';
 import { tempDirs } from './test-util';
 
 // Same hygiene as device-cli.test.ts: never touch the real config or let a
-// leaked BUSY_BAR_ADDR change what candidateRoutes sees. Extra stakes here:
-// with no BUSY_BAR_ADDR, a handler that gets past argument validation would
+// leaked MBAR_ADDR change what candidateRoutes sees. Extra stakes here:
+// with no MBAR_ADDR, a handler that gets past argument validation would
 // probe the *default* routes — the real, shared device — so every test that
-// reaches the wire must point BUSY_BAR_ADDR at a fake first.
-const ENV_KEYS = ['MBAR_CONFIG', 'BUSY_BAR_ADDR', 'BUSY_BAR_ROUTE', 'BUSY_BAR_TOKEN', 'BUSY_BAR_PASSWORD', 'XDG_CONFIG_HOME'];
+// reaches the wire must point MBAR_ADDR at a fake first.
+const ENV_KEYS = ['MBAR_CONFIG', 'MBAR_ADDR', 'MBAR_ROUTE', 'MBAR_TOKEN', 'MBAR_PASSWORD', 'XDG_CONFIG_HOME'];
 const savedEnv: Record<string, string | undefined> = {};
 const { tempDir, cleanup } = tempDirs('mbar-api-cli-');
 
@@ -68,7 +68,7 @@ async function run(command: ApiCommand, args: string[]): Promise<{ code: number;
 }
 
 describe('usage errors (fail before any device contact)', () => {
-  // No BUSY_BAR_ADDR is set in any of these: passing means expect()/parseArgs
+  // No MBAR_ADDR is set in any of these: passing means expect()/parseArgs
   // threw before a handler could reach the network.
   test('missing arguments exit 1 with a `usage: mbar api` line', async () => {
     for (const [cmd, args] of [
@@ -94,7 +94,7 @@ describe('against a fake device', () => {
   test('df --json prints the storage status verbatim', async () => {
     const status = { used_bytes: 1024, free_bytes: 2048, total_bytes: 3072 };
     const fake = fakeDevice((url) => (url.pathname === '/api/storage/status' ? Response.json(status) : undefined));
-    process.env.BUSY_BAR_ADDR = fake.addr;
+    process.env.MBAR_ADDR = fake.addr;
     const { code, out } = await run('df', ['--json']);
     expect(code).toBe(0);
     expect(JSON.parse(out)).toEqual(status);
@@ -115,7 +115,7 @@ describe('against a fake device', () => {
       }
       return undefined;
     });
-    process.env.BUSY_BAR_ADDR = fake.addr;
+    process.env.MBAR_ADDR = fake.addr;
 
     const dir = await run('rm', ['somedir']);
     expect(dir.code).toBe(1);
@@ -136,7 +136,7 @@ describe('against a fake device', () => {
       if (url.pathname === '/api/storage/remove') return Response.json({});
       return undefined;
     });
-    process.env.BUSY_BAR_ADDR = fake.addr;
+    process.env.MBAR_ADDR = fake.addr;
     const { code, out } = await run('rm', ['user_assets/app/a.bin']);
     expect(code).toBe(0);
     expect(out).toContain('removed /ext/user_assets/app/a.bin');

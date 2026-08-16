@@ -9,13 +9,13 @@ import type { MonitorModule, PollResult } from './module';
  * config. A dead port is taken verbatim (no probe), so the host comes up
  * device-less — its designed failure mode — and every draw goes through the
  * injected session, never the wire. */
-const ENV_KEYS = ['MBAR_CONFIG', 'BUSY_BAR_ADDR', 'BUSY_BAR_ROUTE', 'BUSY_BAR_TOKEN', 'BUSY_BAR_PASSWORD', 'XDG_CONFIG_HOME'];
+const ENV_KEYS = ['MBAR_CONFIG', 'MBAR_ADDR', 'MBAR_ROUTE', 'MBAR_TOKEN', 'MBAR_PASSWORD', 'XDG_CONFIG_HOME'];
 let savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {
   savedEnv = Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
   for (const k of ENV_KEYS) delete process.env[k];
-  process.env.BUSY_BAR_ADDR = '127.0.0.1:9';
+  process.env.MBAR_ADDR = '127.0.0.1:9';
 });
 
 afterEach(() => {

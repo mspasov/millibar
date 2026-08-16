@@ -16,13 +16,13 @@
  *        [--help | api <cmd> | probe | routes | show | init | set | rm | order]
  *        (after `bun link`), or bun run src/mbar.ts — no arguments runs
  *        the monitor with every module
- * Env:   BUSY_BAR_ADDR, BUSY_BAR_ROUTE, BUSY_BAR_TOKEN, BUSY_BAR_PASSWORD,
- *        MBAR_CONFIG, BUSY_PRIORITY, POLL_INTERVAL_MS, REFRESH_COOLDOWN_MS,
+ * Env:   MBAR_ADDR, MBAR_ROUTE, MBAR_TOKEN, MBAR_PASSWORD,
+ *        MBAR_CONFIG, MBAR_PRIORITY, MBAR_POLL_INTERVAL_MS, MBAR_REFRESH_COOLDOWN_MS,
  *        MBAR_MODULES (which modules run, comma-separated, in cycle order:
  *        gauge, dash, history, grok, cpu — unset runs all, with grok
  *        joining only when a `grok login` exists),
- *        SWITCH_BUTTON (which button the dial press reports as; default OK),
- *        ANIMATIONS (off disables the sweeps, the history intros, and
+ *        MBAR_SWITCH_BUTTON (which button the dial press reports as; default OK),
+ *        MBAR_ANIMATIONS (off disables the sweeps, the history intros, and
  *        the quit prompt's drain and turn-off farewell)
  */
 import { apiUsage, isApiCommand, runApiCommand } from './api-cli';
@@ -51,10 +51,10 @@ for (let i = argv.length - 1; i >= 0; i--) {
       console.error('--route needs a value: config route name(s), comma-separated — see mbar routes');
       process.exit(1);
     }
-    process.env.BUSY_BAR_ROUTE = value;
+    process.env.MBAR_ROUTE = value;
     argv.splice(i, 2);
   } else if (arg.startsWith('--route=')) {
-    process.env.BUSY_BAR_ROUTE = arg.slice('--route='.length);
+    process.env.MBAR_ROUTE = arg.slice('--route='.length);
     argv.splice(i, 1);
   } else if (arg === '--modules') {
     const value = argv[i + 1];
@@ -68,9 +68,9 @@ for (let i = argv.length - 1; i >= 0; i--) {
     process.env.MBAR_MODULES = arg.slice('--modules='.length);
     argv.splice(i, 1);
   } else if (arg === '--animations' || arg === '--no-animations') {
-    // The bare positive spelling exists to override an ANIMATIONS=off
+    // The bare positive spelling exists to override an MBAR_ANIMATIONS=off
     // inherited from the environment, symmetric with the negative.
-    process.env.ANIMATIONS = arg === '--animations' ? 'on' : 'off';
+    process.env.MBAR_ANIMATIONS = arg === '--animations' ? 'on' : 'off';
     argv.splice(i, 1);
   }
 }
@@ -107,16 +107,16 @@ if (command !== undefined) {
 // shared with whatever else the account is doing (Claude Code sessions poll
 // it too), and 5-minute polling drew regular 429s in day-to-day use.
 // Read here, after command dispatch, so a bad value can't break `mbar probe`.
-const POLL_INTERVAL_MS = envNumber('POLL_INTERVAL_MS', 10 * 60 * 1000, 1000);
-const REFRESH_COOLDOWN_MS = envNumber('REFRESH_COOLDOWN_MS', 5000, 0);
+const MBAR_POLL_INTERVAL_MS = envNumber('MBAR_POLL_INTERVAL_MS', 10 * 60 * 1000, 1000);
+const MBAR_REFRESH_COOLDOWN_MS = envNumber('MBAR_REFRESH_COOLDOWN_MS', 5000, 0);
 
-// ANIMATIONS=off stills everything that moves: the value sweeps collapse to
+// MBAR_ANIMATIONS=off stills everything that moves: the value sweeps collapse to
 // snaps (a zero-length sweep is PctSweep's documented off switch, exercised
 // by every module test), the history screens draw their static sections
 // without the appearance intros, and the quit prompt neither drains its bar
 // nor plays the turn-off farewell.
-const ANIMATIONS = envFlag('ANIMATIONS', true);
-const sweepOptions = ANIMATIONS ? {} : { sweepMs: 0, sweepCoolMs: 0 };
+const MBAR_ANIMATIONS = envFlag('MBAR_ANIMATIONS', true);
+const sweepOptions = MBAR_ANIMATIONS ? {} : { sweepMs: 0, sweepCoolMs: 0 };
 
 // Both usage modules poll on the same cadence; the deduplicated fetcher makes
 // that one request per cycle against the rate-limited endpoint. The 30s TTL
@@ -125,8 +125,8 @@ const sweepOptions = ANIMATIONS ? {} : { sweepMs: 0, sweepCoolMs: 0 };
 // at 1% granularity. The dashboard module is quiet and doesn't persist — the
 // gauge logs each fetch's story and writes the shared usage cache once.
 const usageOptions = {
-  pollIntervalMs: POLL_INTERVAL_MS,
-  refreshCooldownMs: REFRESH_COOLDOWN_MS,
+  pollIntervalMs: MBAR_POLL_INTERVAL_MS,
+  refreshCooldownMs: MBAR_REFRESH_COOLDOWN_MS,
   fetchUsageImpl: dedupedFetchUsage(30_000),
   ...sweepOptions,
 };
@@ -135,8 +135,8 @@ const usageOptions = {
 // wrapper: it is the endpoint's only consumer here (the Claude TTL fetcher
 // exists because two modules share one API).
 const grokOptions = {
-  pollIntervalMs: POLL_INTERVAL_MS,
-  refreshCooldownMs: REFRESH_COOLDOWN_MS,
+  pollIntervalMs: MBAR_POLL_INTERVAL_MS,
+  refreshCooldownMs: MBAR_REFRESH_COOLDOWN_MS,
   ...sweepOptions,
 };
 
@@ -147,7 +147,7 @@ const grokOptions = {
 const roster = [
   { aliases: ['gauge', 'claude-gauge'], value: () => claudeGaugeModule(usageOptions) },
   { aliases: ['dash', 'claude-dash'], value: () => claudeDashModule({ ...usageOptions, quiet: true, persist: false }) },
-  { aliases: ['history', 'claude-history'], value: () => claudeHistoryModule({ intros: ANIMATIONS }) },
+  { aliases: ['history', 'claude-history'], value: () => claudeHistoryModule({ intros: MBAR_ANIMATIONS }) },
   { aliases: ['grok', 'grok-gauge'], value: () => grokGaugeModule(grokOptions) },
   { aliases: ['cpu'], value: () => cpuModule(sweepOptions) },
 ];
@@ -171,5 +171,5 @@ if (process.env.MBAR_MODULES) {
 
 await runHost(
   selected.map((make) => make()),
-  { animations: ANIMATIONS }
+  { animations: MBAR_ANIMATIONS }
 );

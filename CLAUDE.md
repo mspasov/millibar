@@ -23,7 +23,7 @@ non-negotiable.
   radius reaches past the device.
 - **The display is a shared resource.** Only one app holds it at a time. A test script that
   draws at a higher priority will steal the screen (probing over a running monitor needs
-  `BUSY_PRIORITY=51`), and clearing that script leaves the screen blank. An app that drew
+  `MBAR_PRIORITY=51`), and clearing that script leaves the screen blank. An app that drew
   once does not come back on its own; the resident monitor does — next heartbeat (≤60 s)
   or any button press. Clean up with `DELETE /api/display/draw?application_name=…`.
 - **Don't leave background processes running** across a task without saying so. Long-running
@@ -74,7 +74,7 @@ nothing about the middle.
 
 So when something doesn't work, or before claiming it does:
 
-- **HTTP bodies** → point `BUSY_BAR_ADDR` at a local `Bun.serve()` echo server and print
+- **HTTP bodies** → point `MBAR_ADDR` at a local `Bun.serve()` echo server and print
   what actually arrives. Note the client does a `GET /api/version` handshake first and
   requires `api_semver` in the reply.
 - **Display output** → `bun run tools/screenshot.ts`, and read the PNG. Lit-pixel counts are
@@ -89,7 +89,7 @@ So when something doesn't work, or before claiming it does:
   want a round-trip through an independently written reference decoder — playing the
   output proves little. And animation tests with `sweepMs: 0` cannot tell a snap from a
   sweep; that blind spot shipped a real bug.
-- **Failure paths** → `BUSY_BAR_ADDR=127.0.0.1:9` (a dead port) exercises reconnect
+- **Failure paths** → `MBAR_ADDR=127.0.0.1:9` (a dead port) exercises reconnect
   loops, back-off, and error coalescing in seconds, no device needed. Note `mbar`
   retries dead routes forever by design — kill or timeout such an invocation.
 - **Firmware behaviour** → the open-source firmware
@@ -126,7 +126,7 @@ Full detail in DEVICE.md; these are the ones that bite hardest.
   `subarray(offset, offset + readVarint())`. Read the length into a variable first. This
   produced both a crash *and*, in a later "fix", silently zeroed values.
 - **Alpha does not control LED intensity** — only `r/g/b` are read. Scale the components.
-- **Never glue a scheme onto an address.** `BUSY_BAR_ADDR` may be a full URL; use
+- **Never glue a scheme onto an address.** `MBAR_ADDR` may be a full URL; use
   `httpBase()`/`wsBase()` (src/config.ts). Hand-prepending once produced `ws://http://…`
   — the monitor drew fine and silently lost all button input.
 - **Every numeric env var goes through `envNumber()`** (src/config.ts). A malformed value
@@ -162,9 +162,9 @@ Full detail in DEVICE.md; these are the ones that bite hardest.
 - Before claiming a name (CLI, package, repo), search GitHub, npm, Homebrew, and PyPI in
   one pass — `busy` and `barkeep` both turned out taken.
 - Every script reaches the device through `src/connection.ts` (persistent route config,
-  probing, credentials — `mbar probe` to inspect). `BUSY_BAR_ADDR` still overrides
+  probing, credentials — `mbar probe` to inspect). `MBAR_ADDR` still overrides
   everything, unprobed and verbatim, and every script works without it. Wire-level
-  tests get this for free: `stubFetch()` points `BUSY_BAR_ADDR` at itself.
+  tests get this for free: `stubFetch()` points `MBAR_ADDR` at itself.
 - Comments explain *why* — a firmware constraint, a spec inaccuracy, an ordering
   requirement. The code already says what it does.
 - When you learn something about the device that isn't in DEVICE.md, add it there in the

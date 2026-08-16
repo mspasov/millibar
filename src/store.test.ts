@@ -137,10 +137,10 @@ describe('stat', () => {
   });
 });
 
-describe('full-URL BUSY_BAR_ADDR', () => {
+describe('full-URL MBAR_ADDR', () => {
   test('a scheme-carrying addr reaches the server instead of becoming http://http://…', async () => {
     // Real fetch against a local echo server — the regression this guards
-    // broke every `mbar api` command whenever BUSY_BAR_ADDR was a full URL.
+    // broke every `mbar api` command whenever MBAR_ADDR was a full URL.
     const status = { used_bytes: 1024, free_bytes: 2048, total_bytes: 3072 };
     const server = Bun.serve({
       port: 0,
@@ -149,13 +149,13 @@ describe('full-URL BUSY_BAR_ADDR', () => {
           ? Response.json(status)
           : new Response('wrong path', { status: 404 }),
     });
-    const previous = process.env.BUSY_BAR_ADDR;
-    process.env.BUSY_BAR_ADDR = `http://127.0.0.1:${server.port}/`;
+    const previous = process.env.MBAR_ADDR;
+    process.env.MBAR_ADDR = `http://127.0.0.1:${server.port}/`;
     try {
       expect(await storageStatus()).toEqual(status);
     } finally {
-      if (previous === undefined) delete process.env.BUSY_BAR_ADDR;
-      else process.env.BUSY_BAR_ADDR = previous;
+      if (previous === undefined) delete process.env.MBAR_ADDR;
+      else process.env.MBAR_ADDR = previous;
       server.stop(true);
     }
   });

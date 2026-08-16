@@ -40,7 +40,7 @@ export interface QuitConfirmOptions {
   onExpire(): void;
   windowMs?: number;
   tickMs?: number;
-  /** false stills the drain (mbar's ANIMATIONS switch): the bar draws full
+  /** false stills the drain (the MBAR_ANIMATIONS switch): the bar draws full
    * once and only the expiry timer runs. */
   animate?: boolean;
   /** Wait between arming and the first prompt draw, riding out the firmware's

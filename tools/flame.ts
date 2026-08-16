@@ -21,7 +21,7 @@
  *   bun run tools/flame.ts [start-level]        # on device; dial changes level
  *   bun run tools/flame.ts --preview [out.png]  # local contact sheet, no device
  *
- * Env: BUSY_BAR_ADDR, BUSY_PRIORITY
+ * Env: MBAR_ADDR, MBAR_PRIORITY
  */
 import { encodeAnim, type AnimSection } from '../src/anim';
 import { envNumber } from '../src/config';
@@ -53,7 +53,7 @@ const PHASE_LEAD = 3;
 
 const APP_NAME = 'claude_flame';
 const FILE_NAME = 'flame.anim';
-const PRIORITY = envNumber('BUSY_PRIORITY', 50, 1);
+const PRIORITY = envNumber('MBAR_PRIORITY', 50, 1);
 
 /** Redraws refresh this; the display self-clears if the process dies. */
 const DRAW_TIMEOUT_S = 90;

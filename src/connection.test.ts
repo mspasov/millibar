@@ -18,7 +18,7 @@ import { tempDirs } from './test-util';
 
 // Every test runs against a scratch config path and a clean env — the suite
 // must never read (or write!) the developer's real ~/.config/mbar/config.json.
-const ENV_KEYS = ['MBAR_CONFIG', 'BUSY_BAR_ADDR', 'BUSY_BAR_ROUTE', 'BUSY_BAR_TOKEN', 'BUSY_BAR_PASSWORD', 'XDG_CONFIG_HOME'];
+const ENV_KEYS = ['MBAR_CONFIG', 'MBAR_ADDR', 'MBAR_ROUTE', 'MBAR_TOKEN', 'MBAR_PASSWORD', 'XDG_CONFIG_HOME'];
 const savedEnv: Record<string, string | undefined> = {};
 const { tempDir, cleanup } = tempDirs('mbar-connection-');
 
@@ -123,37 +123,37 @@ describe('config file', () => {
 });
 
 describe('candidateRoutes', () => {
-  test('BUSY_BAR_ADDR replaces the whole list with one env route', () => {
+  test('MBAR_ADDR replaces the whole list with one env route', () => {
     writeConfig([{ name: 'lan', addr: 'busy.bar' }]);
-    process.env.BUSY_BAR_ADDR = '192.168.1.50';
+    process.env.MBAR_ADDR = '192.168.1.50';
     expect(candidateRoutes()).toEqual([{ name: 'env', addr: '192.168.1.50', token: undefined, password: undefined }]);
   });
 
-  test('BUSY_BAR_ROUTE narrows the list to the named routes, in that order', () => {
+  test('MBAR_ROUTE narrows the list to the named routes, in that order', () => {
     writeConfig([
       { name: 'usb', addr: '10.0.4.20' },
       { name: 'lan', addr: 'busy.bar' },
       { name: 'cloud', addr: 'api.busy.app', token: 'tok' },
     ]);
-    process.env.BUSY_BAR_ROUTE = 'cloud,lan';
+    process.env.MBAR_ROUTE = 'cloud,lan';
     expect(candidateRoutes().map((r) => r.name)).toEqual(['cloud', 'lan']);
     // Whitespace around names is tolerated — 'cloud, lan' comes from shells.
-    process.env.BUSY_BAR_ROUTE = ' cloud , lan ';
+    process.env.MBAR_ROUTE = ' cloud , lan ';
     expect(candidateRoutes().map((r) => r.name)).toEqual(['cloud', 'lan']);
   });
 
   test('an unknown forced name fails loudly instead of falling back', () => {
     // A typo'd --route silently probing usb anyway would defeat the forcing.
     writeConfig([{ name: 'usb', addr: '10.0.4.20' }]);
-    process.env.BUSY_BAR_ROUTE = 'cluod';
+    process.env.MBAR_ROUTE = 'cluod';
     expect(() => candidateRoutes()).toThrow("no route named 'cluod'");
     expect(() => candidateRoutes()).toThrow('usb');
   });
 
-  test('BUSY_BAR_ADDR wins over BUSY_BAR_ROUTE', () => {
+  test('MBAR_ADDR wins over MBAR_ROUTE', () => {
     writeConfig([{ name: 'lan', addr: 'busy.bar' }]);
-    process.env.BUSY_BAR_ROUTE = 'nonexistent'; // must not even be validated
-    process.env.BUSY_BAR_ADDR = '192.168.1.50';
+    process.env.MBAR_ROUTE = 'nonexistent'; // must not even be validated
+    process.env.MBAR_ADDR = '192.168.1.50';
     expect(candidateRoutes().map((r) => r.name)).toEqual(['env']);
   });
 
@@ -162,8 +162,8 @@ describe('candidateRoutes', () => {
       { name: 'lan', addr: 'busy.bar' },
       { name: 'cloud', addr: 'https://api.busy.app', token: 'from-file' },
     ]);
-    process.env.BUSY_BAR_TOKEN = 'from-env';
-    process.env.BUSY_BAR_PASSWORD = 'pw-env';
+    process.env.MBAR_TOKEN = 'from-env';
+    process.env.MBAR_PASSWORD = 'pw-env';
     const [lan, cloud] = candidateRoutes();
     expect(lan!.token).toBe('from-env');
     expect(lan!.password).toBe('pw-env');
@@ -229,9 +229,9 @@ describe('resolveConnection', () => {
       { name: 'lan', addr: lan.addr },
     ]);
     expect((await resolveConnection()).route.name).toBe('usb');
-    // The memo key covers BUSY_BAR_ROUTE — a caller flipping it mid-process
+    // The memo key covers MBAR_ROUTE — a caller flipping it mid-process
     // must get the newly forced route, not the memoized winner.
-    process.env.BUSY_BAR_ROUTE = 'lan';
+    process.env.MBAR_ROUTE = 'lan';
     expect((await resolveConnection()).route.name).toBe('lan');
   });
 
@@ -273,8 +273,8 @@ describe('resolveConnection', () => {
 describe('deviceFetch', () => {
   test('env route: no probe, base prefixed, auth attached, per-call headers win', async () => {
     const device = fakeDevice();
-    process.env.BUSY_BAR_ADDR = device.addr;
-    process.env.BUSY_BAR_TOKEN = 'tok';
+    process.env.MBAR_ADDR = device.addr;
+    process.env.MBAR_TOKEN = 'tok';
     const response = await deviceFetch('/api/status', { headers: { 'Content-Type': 'application/json' } });
     const body = (await response.json()) as { echoed: string; auth: string };
     expect(body.echoed).toBe('/api/status');
@@ -284,8 +284,8 @@ describe('deviceFetch', () => {
 
   test('every HeadersInit shape merges with auth instead of dropping headers', async () => {
     const device = fakeDevice();
-    process.env.BUSY_BAR_ADDR = device.addr;
-    process.env.BUSY_BAR_TOKEN = 'tok';
+    process.env.MBAR_ADDR = device.addr;
+    process.env.MBAR_TOKEN = 'tok';
     // A Headers instance and a tuple array have no own enumerable string keys,
     // so the old object-spread merge lost them silently.
     const shapes: NonNullable<RequestInit['headers']>[] = [
@@ -359,7 +359,7 @@ describe('wsUrl', () => {
 
   test('no credentials, no query parameter', async () => {
     const device = fakeDevice();
-    process.env.BUSY_BAR_ADDR = device.addr;
+    process.env.MBAR_ADDR = device.addr;
     expect(await wsUrl('/api/status/ws')).toBe(`ws://${device.addr}/api/status/ws`);
   });
 });
