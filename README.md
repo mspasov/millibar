@@ -344,7 +344,7 @@ recovers on its own.
 
 ## Requirements
 
-Bun 1.3+, a BUSY Bar reachable over USB-Ethernet, the LAN, or the cloud proxy, and
+Bun 1.4+, a BUSY Bar reachable over USB-Ethernet, the LAN, or the cloud proxy, and
 Claude Code signed in (for the monitor). The Grok gauge additionally wants a
 `grok login`; without one it simply sits out of the module cycle.
 Credential reading is implemented for the macOS Keychain with a file fallback elsewhere.
