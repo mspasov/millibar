@@ -70,6 +70,14 @@ export interface Connection {
 
 export const DEFAULT_PROBE_TIMEOUT_MS = 3000;
 
+/** `info.version` of docs/openapi.yaml, the snapshot of the device-served spec
+ * that DEVICE.md was checked against. Kept as a constant rather than read from
+ * the file because the published package ships only `dist/`; a test holds the
+ * two equal. `mbar probe` flags a device that reports a different version so a
+ * firmware update is noticed at the moment someone is already touching the
+ * device — the last one went unnoticed for two minor versions. */
+export const DOCUMENTED_API_SEMVER = '27.5.0';
+
 /** Without a config file these still cover both local paths: the fixed
  * USB-Ethernet address and the mDNS hostname on the LAN. */
 export const DEFAULT_ROUTES: Route[] = [

@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { statSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   candidateRoutes,
   configPath,
+  DOCUMENTED_API_SEMVER,
   DEFAULT_ROUTES,
   deviceFetch,
   invalidateConnection,
@@ -378,5 +379,15 @@ describe('wsUrl', () => {
     const device = fakeDevice();
     process.env.MBAR_ADDR = device.addr;
     expect(await wsUrl('/api/status/ws')).toBe(`ws://${device.addr}/api/status/ws`);
+  });
+});
+
+describe('DOCUMENTED_API_SEMVER', () => {
+  test('matches info.version of the vendored docs/openapi.yaml', () => {
+    // The constant exists because the published package ships only dist/;
+    // this is what keeps it honest when the snapshot is refreshed.
+    const spec = readFileSync(join(import.meta.dir, '..', 'docs', 'openapi.yaml'), 'utf8');
+    const version = spec.match(/^info:\n(?:  .*\n)*?  version: (\S+)/m)?.[1];
+    expect(version).toBe(DOCUMENTED_API_SEMVER);
   });
 });

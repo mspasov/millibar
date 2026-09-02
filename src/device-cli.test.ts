@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { DEFAULT_ROUTES, configPath, invalidateConnection, loadDeviceConfig } from './connection';
+import { DEFAULT_ROUTES, DOCUMENTED_API_SEMVER, configPath, invalidateConnection, loadDeviceConfig } from './connection';
 import { runDeviceCommand } from './device-cli';
 import { tempDirs } from './test-util';
 
@@ -31,10 +31,10 @@ afterEach(() => {
 });
 
 const servers: ReturnType<typeof Bun.serve>[] = [];
-function fakeDevice(): string {
+function fakeDevice(semver = DOCUMENTED_API_SEMVER): string {
   const server = Bun.serve({
     port: 0,
-    fetch: () => new Response(JSON.stringify({ api_semver: '25.0.0' })),
+    fetch: () => new Response(JSON.stringify({ api_semver: semver })),
   });
   servers.push(server);
   return `127.0.0.1:${server.port}`;
@@ -128,6 +128,29 @@ describe('probe', () => {
     dead.stop(true);
     process.env.MBAR_ADDR = deadAddr;
     expect(await runDeviceCommand('probe', [])).toBe(1);
+  });
+
+  test('flags a device whose API version differs from the vendored spec', async () => {
+    // The note is the only mechanism that surfaces a firmware update; the
+    // previous one went unnoticed across two minor spec versions.
+    const probeLines = async (addr: string) => {
+      process.env.MBAR_ADDR = addr;
+      invalidateConnection();
+      const lines: string[] = [];
+      const realLog = console.log;
+      console.log = (line: string) => lines.push(line);
+      try {
+        expect(await runDeviceCommand('probe', [])).toBe(0);
+      } finally {
+        console.log = realLog;
+      }
+      return lines.filter((line) => line.includes('docs/openapi.yaml'));
+    };
+    expect(await probeLines(fakeDevice())).toEqual([]);
+    const notes = await probeLines(fakeDevice('99.0.0'));
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toContain('99.0.0');
+    expect(notes[0]).toContain(DOCUMENTED_API_SEMVER);
   });
 });
 

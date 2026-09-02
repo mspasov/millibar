@@ -13,6 +13,7 @@ import { existsSync } from 'node:fs';
 import {
   candidateRoutes,
   configPath,
+  DOCUMENTED_API_SEMVER,
   loadDeviceConfig,
   probeRoute,
   saveDeviceConfig,
@@ -103,12 +104,14 @@ async function probeAll(): Promise<number> {
     `config: ${process.env.MBAR_ADDR ? 'MBAR_ADDR override' : fileNote()}${forced ? ` — forced to ${forced}` : ''}`
   );
   let winner: string | undefined;
+  let winnerSemver = '';
   for (const route of routes) {
     const startedAt = Date.now();
     try {
       const conn = await probeRoute(route);
       const chosen = winner === undefined;
       winner ??= route.name;
+      if (chosen) winnerSemver = conn.apiSemver;
       console.log(
         `  ${describeRoute(route)} ok — api ${conn.apiSemver}, ${Date.now() - startedAt}ms${chosen ? '   <- selected' : ''}`
       );
@@ -119,6 +122,14 @@ async function probeAll(): Promise<number> {
   if (winner === undefined) {
     console.error('no route reachable');
     return 1;
+  }
+  if (winnerSemver !== DOCUMENTED_API_SEMVER) {
+    // The firmware moved under us. docs/openapi.yaml is the snapshot DEVICE.md
+    // was checked against; the gap is read manually (git diff after a refetch).
+    console.log(
+      `  note: device api ${winnerSemver}, docs/openapi.yaml is ${DOCUMENTED_API_SEMVER} — ` +
+        'refetch /openapi.yaml, diff, fold changes into DEVICE.md, bump DOCUMENTED_API_SEMVER'
+    );
   }
   return 0;
 }
