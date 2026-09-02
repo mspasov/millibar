@@ -17,7 +17,15 @@ timer, and supports custom apps. It is controllable over HTTP, MQTT, and BLE.
 | Local hostname | `http://busy.bar/` | Resolves to the same device |
 | Remote proxy | `https://api.busy.app` | Device API under `/busybar/*`; needs a **BUSY Bar-scope** [API token](https://cloud.busy.app/api-tokens) — Account-scope tokens only unlock `/timer/v1/*`. See Authentication |
 
-- The device serves its own OpenAPI spec: **`http://10.0.4.20/openapi.yaml`** (~50 endpoints).
+- The device serves its own OpenAPI spec: **`http://10.0.4.20/openapi.yaml`** (72 operations
+  at 27.5.0). A snapshot lives at [openapi.yaml](openapi.yaml) beside this file — taken from
+  the device, not the firmware repo, where it is split across files and runs ahead of shipped
+  firmware. `mbar probe` prints a note when the device's `api_semver` differs from the
+  snapshot's (`DOCUMENTED_API_SEMVER`, src/connection.ts); a test holds the two equal. To
+  catch up: `curl http://10.0.4.20/openapi.yaml > docs/openapi.yaml`, `git diff`, fold
+  what matters into this file, bump the constant. `git log -p docs/openapi.yaml` is the
+  change history; the *why* is in the firmware checkout's commit log for
+  `applications/services/web_server/openapi/` (ticket numbers in the subjects).
 - CORS is wide open (`Access-Control-Allow-Origin: *`) — browser apps can call the API directly.
 - No HTTP access password is currently configured; the local API is unauthenticated.
   (Can be enabled in the web UI under Settings → HTTP Access.)
@@ -42,7 +50,8 @@ Two independent credential kinds (both optional; from busy-lib source and README
     - **BUSY Bar scope** → the full device API under `/busybar/*` (~48 endpoints, spec:
       <https://api.busy.app/busybar/openapi.yaml>, interactive docs at
       <https://api.busy.app/busybar/docs>; securityScheme: "BUSY Cloud BAR-scope API
-      token"). Spec version matches the device's `api_semver` (25.0.0).
+      token"). Spec version matched the device's `api_semver` at the time (25.0.0; the
+      device has since moved to 27.5.0 — see “Spec changes since 25.0.0”).
     - **Account scope** → the cloud's own "BUSY App HTTP API v1"
       (<https://api.busy.app/openapi.json>, docs at <https://api.busy.app/docs>):
       `/timer/v1/snapshot` and `/timer/v1/profiles` (GET/PUT each) — account-level timer
@@ -85,8 +94,8 @@ deliberately not recorded — it identifies one physical unit and reproduces not
 | Field | Value |
 |---|---|
 | Model | BB.1 |
-| Firmware | 1.1.1 (built 2026-07-29, commit `ac59f45c`) |
-| API semver | 25.0.0 |
+| Firmware | 1.2.3-rc (built 2026-08-29, commit `91c60099`); everything dated before 2026-09-02 was observed on 1.1.1 (built 2026-07-29, `ac59f45c`) |
+| API semver | 27.5.0 (25.0.0 before 2026-09-02); snapshot in [openapi.yaml](openapi.yaml) |
 | Firmware security | secure |
 
 ## Official library
@@ -116,13 +125,49 @@ reference).
 All endpoints live under `/api/`. Key groups: `status`, `busy/snapshot`,
 `busy/profiles/{slot}`, `display/draw`, `display/brightness`, `audio/play`, `audio/volume`,
 `storage/*`, `wifi/*`, `time/*`, `update/*`, `smart_home/*`, `ble/*`, `assets/upload`,
-`screen`, `input`.
+`access/tokens`, `screen`, `input`.
+
+### Spec changes since 25.0.0
+
+Read from the spec diff (firmware `openapi/` history, 184bb2af → a3e92694) on 2026-09-02.
+**Per spec, not verified on the wire** unless marked — treat each as a claim to echo-test
+before relying on it. busy-lib 0.18.0 (2026-08-07) predates all of it: no token methods,
+and its draw/clear types know nothing of the new fields, so use raw `fetch` for these.
+
+- **Access tokens** (27.4.0, with the Home Assistant integration) — the only new
+  endpoints. `GET /api/access/tokens` lists `{short_id, display_id, name, created_at,
+  last_used_at}` (timestamps are numbers-in-strings); `POST` with `{name}` creates one and
+  returns the full `token` **once**, usable in `X-API-Token` in place of the access key;
+  `DELETE /api/access/tokens` revokes all, `DELETE /api/access/tokens/{short_id}` one.
+- **Selective clear** (27.3.0). `DELETE /api/display/draw` takes an optional JSON body
+  `{application_name?, element_ids?: string[]}` — remove named elements instead of hiding
+  them with zero alpha or wiping the app. `application_name` in the body is only a
+  sanity check; omit it and the ids are deleted regardless of owner. Directly relevant to
+  the “elements persist by id” trap below.
+- **`z_index`** (27.3.0) on every element, `0…2^31-1`, higher on top. Previously stacking
+  was implicit.
+- **`xpmbitmap` element** (27.1.0): `{type:"xpmbitmap", data:"! XPM2\n…", opacity?}` —
+  an inline XPM2 image as text, no asset upload. Limits: ≤32 colours, ≤4 chars per
+  pixel, must fit the target display.
+- **Asset paths** (26.0.0): `assets/upload`’s `file` may contain subdirectories, which are
+  created. Hard caps now in the schema: application names ≤32 chars, asset paths ≤64,
+  stock paths ≤256.
+- **`POST /api/storage/write?append=1`** (27.5.0) appends; the file is created if missing.
+- **Error bodies** (27.0.0): the integer `code` field became a string `error_code`, with
+  enums on `/api/update/install` (`version_missing`, `not_available`, `version_mismatch`,
+  `busy`, `battery_low`). Nothing in this repo read the old field.
+- **`x-local-only`** (26.1.0) marks endpoints the cloud proxy refuses: `/api/status/ws`
+  (matches the WebSocket finding under Authentication), `/api/update`, `wifi/*`,
+  `account/link`, `account/backend`, `account` (DELETE).
+
+Upstream at 27.6.0 (2026-08-26, not on this device yet) adds only a `superscript` text
+font and description text.
 
 ### Status
 
 ```sh
 curl http://10.0.4.20/api/status    # device, firmware, system, power (battery %, charging)
-curl http://10.0.4.20/api/version   # {"api_semver":"25.0.0"}
+curl http://10.0.4.20/api/version   # {"api_semver":"27.5.0"}
 ```
 
 ### Busy timer
