@@ -1,6 +1,6 @@
 {
   "name": "millibar",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "BUSY Bar CLI and Claude Code usage monitor",
   "license": "MIT",
   "repository": "github:mspasov/millibar",
