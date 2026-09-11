@@ -57,6 +57,35 @@ async function until(cond: () => boolean, what: string, ms = 3000): Promise<void
   }
 }
 
+describe('runHost start module', () => {
+  const quiet = (id: string): MonitorModule => ({
+    id,
+    title: id,
+    poll: async () => ({ nextPollMs: 60_000, holdRefreshMs: 0 }),
+    render: () => [textEl('x')],
+  });
+
+  test('startModule picks the first module drawn without reordering the others', async () => {
+    const { events, session, exit } = harness();
+    const stop = new AbortController();
+    const run = runHost([quiet('a'), quiet('b'), quiet('c')], {
+      session, exit, signal: stop.signal, animations: false, heartbeatMs: 60_000, startModule: 1,
+    });
+    await until(() => events.some((e) => e.startsWith('draw:')), 'the first draw');
+    expect(events[0]).toBe('draw:b.x');
+    stop.abort();
+    await run;
+  });
+
+  test('an out-of-range startModule fails before the display is touched', async () => {
+    const { events, session, exit } = harness();
+    await expect(runHost([quiet('a')], { session, exit, animations: false, startModule: 1 })).rejects.toThrow(
+      /out of range/
+    );
+    expect(events).toEqual([]);
+  });
+});
+
 describe('runHost shutdown', () => {
   test('a poll resolving after quit cannot repaint the cleared display', async () => {
     const { events, exits, session, exit } = harness();

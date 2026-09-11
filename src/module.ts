@@ -71,6 +71,47 @@ export interface MonitorModule {
   render(frame: RenderFrame): DrawElement[];
   /** Encoder rotation while this module is active. The host repaints after. */
   onEncoder?(delta: number): void;
+  /** The screen labels the encoder cycles, for validating `--start` up
+   * front — or null while the list is data-driven and not yet known (the
+   * limit modules rebuild theirs from every poll). */
+  screens?(): string[] | null;
+  /** Make `label` (case-insensitive) the current screen — now if the list
+   * is known, otherwise as soon as a rebuild contains it. A label that never
+   * turns up is the module's to warn about, once. */
+  selectScreen?(label: string): void;
+}
+
+/** A `--start` / MBAR_START selection: a module, optionally with a screen. */
+export interface StartSpec {
+  module: string;
+  screen?: string;
+}
+
+/**
+ * Parses `<module>[:<screen>]` — case-insensitive, whitespace-tolerant, the
+ * module name resolved against `choices` (any alias) and returned canonical.
+ * Screen names are validated by the module itself, since the limit modules
+ * only learn theirs from data.
+ */
+export function parseStart<T>(spec: string, choices: ModuleChoice<T>[]): StartSpec {
+  const canonical = choices.map((c) => c.aliases[0]).join(', ');
+  const [moduleRaw = '', screenRaw, ...rest] = spec.split(':');
+  const moduleName = moduleRaw.trim().toLowerCase();
+  const screen = screenRaw?.trim().toLowerCase();
+  if (moduleName === '' || rest.length > 0 || screen === '') {
+    throw new Error(`--start/MBAR_START: expected <module>[:<screen>], got '${spec}' — modules: ${canonical}`);
+  }
+  const choice = choices.find((c) => c.aliases.includes(moduleName));
+  if (!choice) {
+    throw new Error(`--start/MBAR_START: unknown module '${moduleName}' — valid: ${canonical}`);
+  }
+  return screen === undefined ? { module: choice.aliases[0]! } : { module: choice.aliases[0]!, screen };
+}
+
+/** Case-insensitive label lookup shared by the modules' selectScreen. */
+export function findScreen(labels: string[], label: string): number {
+  const wanted = label.toLowerCase();
+  return labels.findIndex((l) => l.toLowerCase() === wanted);
 }
 
 /** Wraps an index by `delta` in both directions; deltas can exceed 1 on a

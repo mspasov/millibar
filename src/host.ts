@@ -47,6 +47,9 @@ export interface HostOptions {
   heartbeatMs?: number;
   /** Which button the dial press reports as. */
   switchButton?: Button;
+  /** Index into `modules` of the one shown first (`mbar --start`). The dial
+   * cycle keeps the array's order; only the entry point moves. */
+  startModule?: number;
   /** false stills the quit-confirm drain and skips the turn-off farewell
    * (the MBAR_ANIMATIONS switch). */
   animations?: boolean;
@@ -89,7 +92,10 @@ export async function runHost(modules: MonitorModule[], options: HostOptions = {
       timeoutS: Math.ceil((heartbeatMs * 1.5) / 1000),
     });
 
-  let activeIndex = 0;
+  let activeIndex = options.startModule ?? 0;
+  if (!Number.isInteger(activeIndex) || activeIndex < 0 || activeIndex >= modules.length) {
+    throw new Error(`startModule ${activeIndex} is out of range for ${modules.length} module(s)`);
+  }
   const active = () => runners[activeIndex]!;
 
   /** True from a switch-away event until SWITCH_RESUME_MS after the switch

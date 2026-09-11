@@ -12,8 +12,8 @@
  * subcommands, src/api-cli.ts the storage/api subcommands. Adding a
  * monitor means writing one module file and registering it here.
  *
- * Usage: mbar [--route <names>] [--modules <names>] [--[no-]animations]
- *        [--help | api <cmd> | probe | routes | show | init | set | rm | order]
+ * Usage: mbar [--route <names>] [--modules <names>] [--start <module>[:<screen>]]
+ *        [--[no-]animations] [--help | api <cmd> | probe | routes | show | init | set | rm | order]
  *        (after `bun link`), or bun run src/mbar.ts — no arguments runs
  *        the monitor with every module
  * Env:   MBAR_ADDR, MBAR_ROUTE, MBAR_TOKEN, MBAR_PASSWORD,
@@ -21,7 +21,10 @@
  *        MBAR_MODULES (which modules run, comma-separated, in cycle order:
  *        gauge, dash, history, grok, cpu — unset runs all whose sign-in
  *        exists: gauge/dash need a Claude Code login, grok a `grok login`),
- *        MBAR_SWITCH_BUTTON (which button the dial press reports as; default OK),
+ *        MBAR_START (which module, and optionally which of its screens, shows
+ *        first — `dash:7d`, `history:all`, `cpu:15m`; the dial cycle order is
+ *        unchanged), MBAR_SWITCH_BUTTON (which button the dial press reports
+ *        as; default OK),
  *        MBAR_ANIMATIONS (off disables the sweeps, the history intros, and
  *        the quit prompt's drain and turn-off farewell)
  */
@@ -29,7 +32,7 @@ import { apiUsage, isApiCommand, runApiCommand } from './api-cli';
 import { envFlag, envNumber } from './config';
 import { isDeviceCommand, mbarUsage, runDeviceCommand } from './device-cli';
 import { runHost } from './host';
-import { selectModules } from './module';
+import { parseStart, selectModules, type MonitorModule } from './module';
 import { hasGrokCredentials } from './grok-usage';
 import { claudeDashModule } from './modules/claude-dash';
 import { claudeGaugeModule } from './modules/claude-gauge';
@@ -66,6 +69,17 @@ for (let i = argv.length - 1; i >= 0; i--) {
     argv.splice(i, 2);
   } else if (arg.startsWith('--modules=')) {
     process.env.MBAR_MODULES = arg.slice('--modules='.length);
+    argv.splice(i, 1);
+  } else if (arg === '--start') {
+    const value = argv[i + 1];
+    if (value === undefined) {
+      console.error('--start needs a value: <module>[:<screen>], e.g. dash:7d — modules: gauge, dash, history, grok, cpu');
+      process.exit(1);
+    }
+    process.env.MBAR_START = value;
+    argv.splice(i, 2);
+  } else if (arg.startsWith('--start=')) {
+    process.env.MBAR_START = arg.slice('--start='.length);
     argv.splice(i, 1);
   } else if (arg === '--animations' || arg === '--no-animations') {
     // The bare positive spelling exists to override an MBAR_ANIMATIONS=off
@@ -161,10 +175,10 @@ const roster = [
 // absence is silent (most machines never ran `grok login`); Claude's gets a
 // line, because a monitor installed for Claude usage coming up without it
 // would otherwise look broken for no stated reason.
-let selected: Array<() => ReturnType<(typeof roster)[number]['value']>>;
+let selected: Array<(typeof roster)[number]>;
 if (process.env.MBAR_MODULES) {
   try {
-    selected = selectModules(process.env.MBAR_MODULES, roster);
+    selected = selectModules(process.env.MBAR_MODULES, roster.map((choice) => ({ ...choice, value: choice })));
   } catch (error) {
     console.error((error as Error).message);
     process.exit(1);
@@ -182,11 +196,35 @@ if (process.env.MBAR_MODULES) {
       if (name === 'gauge' || name === 'dash') return claude;
       if (name === 'grok') return hasGrokCredentials();
       return true;
-    })
-    .map((choice) => choice.value);
+    });
 }
 
-await runHost(
-  selected.map((make) => make()),
-  { animations: MBAR_ANIMATIONS }
-);
+const modules: MonitorModule[] = selected.map((choice) => choice.value());
+
+// --start picks the entry point without touching the cycle order (--modules
+// does both, which is the wrong tool when you only want to land somewhere
+// else). Static screen lists are checked here so a typo fails before the
+// display is touched; the limit modules learn their windows from data and
+// warn on the first poll instead.
+let startModule = 0;
+if (process.env.MBAR_START) {
+  try {
+    const start = parseStart(process.env.MBAR_START, roster);
+    startModule = selected.findIndex((choice) => choice.aliases[0] === start.module);
+    if (startModule < 0) {
+      throw new Error(
+        `--start/MBAR_START: '${start.module}' is not among the running modules (${selected.map((c) => c.aliases[0]).join(', ')})`
+      );
+    }
+    if (start.screen !== undefined) {
+      const module = modules[startModule]!;
+      if (!module.selectScreen) throw new Error(`--start/MBAR_START: ${start.module} has no screens to pick`);
+      module.selectScreen(start.screen);
+    }
+  } catch (error) {
+    console.error((error as Error).message);
+    process.exit(1);
+  }
+}
+
+await runHost(modules, { animations: MBAR_ANIMATIONS, startModule });

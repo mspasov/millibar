@@ -50,7 +50,7 @@
  */
 import { encodeAnim, type AnimSection } from '../anim';
 import { COLORS, DISPLAYS, HIDDEN, scaleRgb, type DrawElement } from '../display';
-import { wrapIndex, type ModuleContext, type MonitorModule, type PollResult } from '../module';
+import { findScreen, wrapIndex, type ModuleContext, type MonitorModule, type PollResult } from '../module';
 import {
   daysBetween,
   loadStatsHistory,
@@ -730,6 +730,21 @@ export function claudeHistoryModule(options: ClaudeHistoryOptions = {}): Monitor
       if (history) {
         ctx?.log(`-> ${screen.label} (${formatTokensCompact(windowTotal(screen))} tokens)`);
       }
+    },
+
+    screens: () => SCREENS.map((s) => s.label),
+
+    // Before init: the first upload arms the intro for whatever screen is
+    // current, so the chosen one gets its appearance like the default would.
+    selectScreen(label) {
+      const index = findScreen(
+        SCREENS.map((s) => s.label),
+        label
+      );
+      if (index < 0) {
+        throw new Error(`history has no screen '${label}' — valid: ${SCREENS.map((s) => s.label).join(', ')}`);
+      }
+      screenIndex = index;
     },
   };
 }

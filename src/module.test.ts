@@ -2,12 +2,44 @@ import { describe, expect, test } from 'bun:test';
 import {
   MIN_INDICATOR_MS,
   ModuleRunner,
+  findScreen,
+  parseStart,
   selectModules,
   wrapIndex,
   type ModuleChoice,
   type MonitorModule,
   type PollResult,
 } from './module';
+
+describe('parseStart', () => {
+  const roster: ModuleChoice<string>[] = [
+    { aliases: ['gauge', 'claude-gauge'], value: 'G' },
+    { aliases: ['dash', 'claude-dash'], value: 'D' },
+    { aliases: ['cpu'], value: 'C' },
+  ];
+
+  test('a bare module name, or module:screen, resolved to the canonical alias', () => {
+    expect(parseStart('cpu', roster)).toEqual({ module: 'cpu' });
+    expect(parseStart('Claude-Dash:7D', roster)).toEqual({ module: 'dash', screen: '7d' });
+    expect(parseStart(' gauge : Fable ', roster)).toEqual({ module: 'gauge', screen: 'fable' });
+  });
+
+  test('rejects unknown modules, empty parts, and extra colons, naming the modules', () => {
+    expect(() => parseStart('history', roster)).toThrow(/unknown module 'history' — valid: gauge, dash, cpu/);
+    expect(() => parseStart('', roster)).toThrow(/expected <module>\[:<screen>\]/);
+    expect(() => parseStart('cpu:', roster)).toThrow(/expected <module>/);
+    expect(() => parseStart(':5m', roster)).toThrow(/expected <module>/);
+    expect(() => parseStart('cpu:5m:x', roster)).toThrow(/expected <module>/);
+  });
+});
+
+describe('findScreen', () => {
+  test('matches labels case-insensitively', () => {
+    expect(findScreen(['5H', '7D', 'FABLE'], 'fable')).toBe(2);
+    expect(findScreen(['5H', '7D'], '5h')).toBe(0);
+    expect(findScreen(['5H', '7D'], 'opus')).toBe(-1);
+  });
+});
 
 describe('selectModules', () => {
   const roster: ModuleChoice<string>[] = [

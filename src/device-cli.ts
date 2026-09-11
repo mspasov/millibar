@@ -40,6 +40,12 @@ Monitor (the default — no arguments):
                          gauge, dash, history, grok, cpu. The first named is
                          the startup screen; unset runs all (grok only when
                          a \`grok login\` exists). Equivalent to MBAR_MODULES.
+  --start <module>[:<screen>]
+                         where the monitor lands first, without reordering
+                         the dial cycle: a module name (as above), optionally
+                         with one of its screens — gauge:7d, dash:fable,
+                         history:all, cpu:15m. Screen names match the label
+                         on the display, any case. Equivalent to MBAR_START.
   --no-animations        still everything that moves: value changes snap
                          instead of sweeping, history screens skip their
                          intros, quitting skips the turn-off farewell.
@@ -83,9 +89,10 @@ Environment:
   MBAR_PASSWORD          HTTP Access Password, likewise
   MBAR_CONFIG            route config path
   MBAR_POLL_INTERVAL_MS, MBAR_REFRESH_COOLDOWN_MS, MBAR_PRIORITY,
-  MBAR_SWITCH_BUTTON, MBAR_ANIMATIONS
-                         monitor tuning — see README (MBAR_ANIMATIONS is what
-                         --[no-]animations sets)`;
+  MBAR_SWITCH_BUTTON, MBAR_START, MBAR_ANIMATIONS
+                         monitor tuning — see README (MBAR_START is what
+                         --start sets, MBAR_ANIMATIONS what --[no-]animations
+                         sets)`;
 }
 
 function fileNote(): string {

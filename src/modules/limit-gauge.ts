@@ -29,7 +29,7 @@ import {
   type DrawElement,
 } from '../display';
 import { PctSweep, sweepHead } from '../sweep';
-import { wrapIndex, type ModuleContext, type MonitorModule, type RenderFrame } from '../module';
+import { findScreen, wrapIndex, type ModuleContext, type MonitorModule, type RenderFrame } from '../module';
 import {
   formatReset,
   paceTick,
@@ -68,6 +68,10 @@ export interface LimitGaugeSpec<D> {
 export function limitGaugeModule<D>(spec: LimitGaugeSpec<D>, options: LimitModuleOptions<D>): MonitorModule {
   let ctx: ModuleContext | null = null;
   let screenIndex = 0;
+  /** A `--start` screen not yet seen in the list. Model-window labels only
+   * exist once data arrives, so the pick waits for the first rebuild that
+   * carries it; a rebuild that still lacks it keeps the default and warns. */
+  let pendingLabel: string | null = null;
 
   const sweep = new PctSweep({
     durationMs: options.sweepMs,
@@ -81,8 +85,19 @@ export function limitGaugeModule<D>(spec: LimitGaugeSpec<D>, options: LimitModul
     const previousLabel = previousScreens[screenIndex]?.label;
     const sameScreen = poller.screens.findIndex((v) => v.label === previousLabel);
     screenIndex = sameScreen >= 0 ? sameScreen : Math.min(screenIndex, Math.max(poller.screens.length - 1, 0));
+    if (pendingLabel !== null) screenIndex = takePendingScreen(screenIndex);
     retarget();
   });
+
+  const takePendingScreen = (fallback: number): number => {
+    const labels = poller.screens.map((v) => v.label);
+    const wanted = findScreen(labels, pendingLabel!);
+    if (wanted < 0) {
+      ctx?.warn(`no '${pendingLabel!.toUpperCase()}' window in this account's limits — starting on ${labels[fallback] ?? '?'} (have: ${labels.join(', ')})`);
+    }
+    pendingLabel = null;
+    return wanted >= 0 ? wanted : fallback;
+  };
 
   const currentScreen = (): Screen | null => poller.screens[screenIndex] ?? null;
 
@@ -198,6 +213,18 @@ export function limitGaugeModule<D>(spec: LimitGaugeSpec<D>, options: LimitModul
       const screen = currentScreen();
       if (screen) {
         ctx?.log(`-> ${screen.label} ${screen.window.utilization}% (${formatReset(screen.window.resetsAt)})`);
+      }
+    },
+
+    // Null until data: the window list is rebuilt from every poll, so it
+    // cannot be validated up front — see pendingLabel.
+    screens: () => (poller.screens.length > 0 ? poller.screens.map((v) => v.label) : null),
+
+    selectScreen(label) {
+      pendingLabel = label;
+      if (poller.screens.length > 0) {
+        screenIndex = takePendingScreen(screenIndex);
+        retarget();
       }
     },
   };

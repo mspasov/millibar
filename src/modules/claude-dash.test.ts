@@ -159,6 +159,28 @@ describe('render', () => {
     expect(els.marker).toMatchObject({ y: 13 }); // second of two rows now
   });
 
+  test('a screen selected before any data takes effect on the first poll, marker and all', async () => {
+    const module = makeModule(async () => usageFixture());
+    expect(module.screens!()).toBeNull(); // nothing to validate against yet
+    module.selectScreen!('fable');
+    await module.poll();
+    const els = byId(module);
+    expect(els.label).toMatchObject({ text: 'FABLE' });
+    expect(els.marker).toMatchObject({ y: 14, height: 2 }); // third row
+    expect(els.w2fill).toMatchObject({ fill_colors: [COLORS.critical] }); // selected: full brightness
+    expect(module.screens!()).toEqual(['5H', '7D', 'FABLE']);
+  });
+
+  test('a window the account lacks warns once and starts on the default', async () => {
+    const warns: string[] = [];
+    const module = makeModule(async () => usageFixture(), {}, { warn: (m) => warns.push(m) });
+    module.selectScreen!('opus');
+    await module.poll();
+    await module.poll();
+    expect(byId(module).label).toMatchObject({ text: '5H' });
+    expect(warns).toEqual(["no 'OPUS' window in this account's limits — starting on 5H (have: 5H, 7D, FABLE)"]);
+  });
+
   test('going stale greys every row on the ladder', async () => {
     let fail = false;
     const module = makeModule(async () => {

@@ -15,7 +15,7 @@
  */
 import os from 'node:os';
 import { COLORS, DISPLAYS, progressBar, severityColor, type DrawElement } from '../display';
-import { wrapIndex, type ModuleContext, type MonitorModule, type PollResult } from '../module';
+import { findScreen, wrapIndex, type ModuleContext, type MonitorModule, type PollResult } from '../module';
 import { PctSweep, sweepHead } from '../sweep';
 
 const WIDTH = DISPLAYS.front.width;
@@ -23,11 +23,12 @@ const BAR_Y = 12;
 const BAR_HEIGHT = 3;
 const LABEL_X = 2;
 
-/** One screen per load-average window os.loadavg publishes. */
+/** One screen per load-average window os.loadavg publishes. `key` is what
+ * `--start cpu:<key>` matches — the label's `CPU ` prefix is display only. */
 const SCREENS = [
-  { label: 'CPU 1M', index: 0 },
-  { label: 'CPU 5M', index: 1 },
-  { label: 'CPU 15M', index: 2 },
+  { label: 'CPU 1M', key: '1M', index: 0 },
+  { label: 'CPU 5M', key: '5M', index: 1 },
+  { label: 'CPU 15M', key: '15M', index: 2 },
 ] as const;
 
 /** loadavg only moves every ~5s; 2s keeps the bar lively without draw spam. */
@@ -125,6 +126,15 @@ export function cpuModule(options: CpuOptions = {}): MonitorModule {
       screenIndex = wrapIndex(screenIndex, delta, SCREENS.length);
       // Screen switches always sweep — the head flash doubles as feedback that
       // the rotation registered, even when the windows' values sit close.
+      retarget();
+    },
+
+    screens: () => SCREENS.map((s) => s.key),
+
+    selectScreen(label) {
+      const index = findScreen(SCREENS.map((s) => s.key), label);
+      if (index < 0) throw new Error(`cpu has no screen '${label}' — valid: ${SCREENS.map((s) => s.key).join(', ')}`);
+      screenIndex = index;
       retarget();
     },
   };

@@ -86,7 +86,7 @@ it hangs or errors, see [Troubleshooting](#troubleshooting).
 | Command | What it does |
 |---|---|
 | `bun run tools/smoke.ts` | Smoke test — prints device status and busy-timer state. |
-| `mbar` (or `bun run src/mbar.ts`) | **The monitor.** Switchable modules on the display: Claude Code limits, token history (last 30/7 days, stacked by model), the Grok weekly credit pool, and CPU load. Dial press switches modules, rotation cycles screens, `START` refreshes, `BACK` twice quits. `--modules gauge,cpu` picks which modules run (and their order). |
+| `mbar` (or `bun run src/mbar.ts`) | **The monitor.** Switchable modules on the display: Claude Code limits, token history (last 30/7 days, stacked by model), the Grok weekly credit pool, and CPU load. Dial press switches modules, rotation cycles screens, `START` refreshes, `BACK` twice quits. `--modules gauge,cpu` picks which modules run (and their order); `--start dash:7d` picks where it lands first. |
 | `bun run src/input.ts` | Prints button, switch, and encoder events live. |
 | `bun run src/led.ts pulse "#00CCFF" 1400 2` | Pulses the status light — colour, duration ms, cycles. |
 | `bun run src/led.ts fade "#F00,#0F0,#00F" 3000 hsv` | Crossfades through colour stops — stops, duration ms, `rgb`\|`hsv`. |
@@ -170,6 +170,7 @@ All via environment variables; every one has a working default.
 | `MBAR_PRIORITY` | `50` | monitor — draw priority, 1–100 |
 | `MBAR_SWITCH_BUTTON` | `OK` | monitor — which button event the dial press reports as (`OK`\|`BACK`\|`START`) |
 | `MBAR_MODULES` | unset (all) | monitor — which modules run and their cycle order, comma-separated (`gauge,dash,history,grok,cpu`); the first named is the startup module. Unset includes `grok` only when a `grok login` exists. Same as `mbar --modules` (the flag wins) |
+| `MBAR_START` | unset (first module, first screen) | monitor — where it lands first: a module name, optionally `:` and one of its screens (`dash:7d`, `history:all`, `cpu:15m`, `gauge:fable`). The dial cycle keeps its order. Same as `mbar --start` (the flag wins) |
 | `MBAR_ANIMATIONS` | `on` | monitor — `off` stills everything that moves: value changes snap instead of sweeping, and the history screens appear without their intros. Same as `mbar --no-animations` (the flag wins) |
 | `CLAUDE_CONFIG_DIR` | `~/.claude` | usage — where credentials are read from off-macOS |
 
@@ -262,6 +263,13 @@ device actually sustains.
   scope), so rotation does nothing there. The limit window list is rebuilt each poll,
   since the API adds and drops model windows; the selection follows its label rather
   than its index so a refresh never jumps you elsewhere.
+- **Start somewhere else** with `mbar --start <module>[:<screen>]` (or `MBAR_START`):
+  `--start history:all` opens on the heatmap, `--start dash:7d` on the dashboard with the
+  7-day bar selected, `--start cpu` on CPU load at its first screen. Screen names are the
+  labels on the display, any case; the dial cycle keeps its `--modules` order. A screen
+  the static modules don't have is an error before anything is drawn; a limit window the
+  account doesn't have (say `gauge:fable` without a Fable window) is only knowable once
+  usage has been fetched, so it logs a warning then and starts on the first window.
 - **Press `START`** to refresh the active module immediately. Three cyan dots replace the
   countdown while fetching and the status light fades. During cooldown a press still
   repaints (without refetching), so a blank screen is always recoverable — every button

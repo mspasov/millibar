@@ -391,6 +391,18 @@ describe('module', () => {
 
   const byId = (elements: { id?: string }[], id: string) => elements.find((el) => el.id === id) as any;
 
+  test('selectScreen before the first upload makes that screen the one whose intro plays', async () => {
+    const { module, swaps } = makeModule([day('2026-08-06', { 'claude-fable-5': 100 })]);
+    expect(module.screens!()).toEqual(['30D', '7D', 'ALL']);
+    module.selectScreen!('all');
+    await module.poll();
+    const els = module.render({ refreshing: false });
+    expect(byId(els, 'chart')).toMatchObject({ section: 'intro-heat' });
+    expect(byId(els, 'label')).toMatchObject({ text: 'ALL' });
+    expect(swaps).toHaveLength(1);
+    expect(() => module.selectScreen!('1y')).toThrow(/no screen '1y' — valid: 30D, 7D, ALL/);
+  });
+
   test('poll uploads the asset under the host application name, once per mtime', async () => {
     const { module, path, uploads } = makeModule([day('2026-08-06', { 'claude-fable-5': 100 })]);
     await module.poll();

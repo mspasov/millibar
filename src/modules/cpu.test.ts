@@ -45,6 +45,16 @@ describe('cpuModule', () => {
     expect(shownLabel(module)).toBe('CPU 15M');
   });
 
+  test('selectScreen picks a window by its short key before the first poll; unknown keys throw', async () => {
+    const module = makeModule({ sweepMs: 0, sweepCoolMs: 0, cores: 8, loadavg: () => [4, 2, 16] });
+    expect(module.screens!()).toEqual(['1M', '5M', '15M']);
+    module.selectScreen!('15m');
+    await module.poll();
+    expect(shownLabel(module)).toBe('CPU 15M');
+    expect(shownPct(module)).toBe('100%');
+    expect(() => module.selectScreen!('CPU 1M')).toThrow(/no screen 'CPU 1M' — valid: 1M, 5M, 15M/);
+  });
+
   test('an empty os.cpus() falls back to one core instead of dividing by zero', async () => {
     // Some containers report no CPUs; cores: 0 is what `?? os.cpus().length`
     // produced there. Unguarded, load/0 pegged the bar at 100% — and a zero

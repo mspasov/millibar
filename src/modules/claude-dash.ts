@@ -31,7 +31,7 @@ import {
   type DrawElement,
 } from '../display';
 import { PctSweep, sweepHead } from '../sweep';
-import { wrapIndex, type ModuleContext, type MonitorModule, type RenderFrame } from '../module';
+import { findScreen, wrapIndex, type ModuleContext, type MonitorModule, type RenderFrame } from '../module';
 import {
   claudeUsageSource,
   formatReset,
@@ -104,6 +104,8 @@ function stripSlots(count: number): Array<{ y: number; height: number }> {
 export function claudeDashModule(options: LimitModuleOptions): MonitorModule {
   let ctx: ModuleContext | null = null;
   let screenIndex = 0;
+  /** A `--start` screen not yet seen in the list (see limit-gauge.ts). */
+  let pendingLabel: string | null = null;
 
   /** Two animations with different rules. The number (and its colour) rolls
    * on every change, selection moves included — motion in the readout says
@@ -130,12 +132,23 @@ export function claudeDashModule(options: LimitModuleOptions): MonitorModule {
     const previousLabel = previousScreens[screenIndex]?.label;
     const sameScreen = poller.screens.findIndex((v) => v.label === previousLabel);
     screenIndex = sameScreen >= 0 ? sameScreen : Math.min(screenIndex, Math.max(poller.screens.length - 1, 0));
+    if (pendingLabel !== null) screenIndex = takePendingScreen(screenIndex);
     // A vanished window drops the selection onto a different one — snap the
     // bar, as for an encoder move. The very first data (no previous screens)
     // sweeps: that's the startup reveal rising from 0, not another window's
-    // value.
+    // value — a --start pick included, since it lands before any data.
     retarget({ snapBar: previousScreens.length > 0 && sameScreen < 0 });
   });
+
+  const takePendingScreen = (fallback: number): number => {
+    const labels = poller.screens.map((v) => v.label);
+    const wanted = findScreen(labels, pendingLabel!);
+    if (wanted < 0) {
+      ctx?.warn(`no '${pendingLabel!.toUpperCase()}' window in this account's limits — starting on ${labels[fallback] ?? '?'} (have: ${labels.join(', ')})`);
+    }
+    pendingLabel = null;
+    return wanted >= 0 ? wanted : fallback;
+  };
 
   const currentScreen = (): Screen | null => poller.screens[screenIndex] ?? null;
 
@@ -305,6 +318,16 @@ export function claudeDashModule(options: LimitModuleOptions): MonitorModule {
       const screen = currentScreen();
       if (screen) {
         ctx?.log(`-> ${screen.label} ${screen.window.utilization}% (${formatReset(screen.window.resetsAt)})`);
+      }
+    },
+
+    screens: () => (poller.screens.length > 0 ? poller.screens.map((v) => v.label) : null),
+
+    selectScreen(label) {
+      pendingLabel = label;
+      if (poller.screens.length > 0) {
+        screenIndex = takePendingScreen(screenIndex);
+        retarget({ snapBar: true });
       }
     },
   };

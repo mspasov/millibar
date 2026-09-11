@@ -45,6 +45,26 @@ function makeModule(fetchImpl: () => Promise<Usage>, over: Partial<ClaudeGaugeOp
   return module;
 }
 
+describe('selectScreen', () => {
+  test('a selection made before data waits for the first screen list', async () => {
+    const module = makeModule(async () => usageFixture());
+    expect(module.screens!()).toBeNull();
+    module.selectScreen!('7d');
+    await module.poll();
+    const label = module.render({ refreshing: false }).find((el) => el.id === 'label') as any;
+    expect(label.text).toBe('7D');
+    expect(module.screens!()).toEqual(['5H', '7D']);
+  });
+
+  test('a selection made after data applies immediately', async () => {
+    const module = makeModule(async () => usageFixture());
+    await module.poll();
+    module.selectScreen!('7D');
+    const label = module.render({ refreshing: false }).find((el) => el.id === 'label') as any;
+    expect(label.text).toBe('7D');
+  });
+});
+
 describe('buildScreens', () => {
   test('window order is 5H, 7D, then per-model weekly windows uppercased', () => {
     const screens = buildScreens(
