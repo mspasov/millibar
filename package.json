@@ -28,8 +28,8 @@
     "bun": ">=1.4.0"
   },
   "devDependencies": {
-    "@busy-app/busy-lib": "^0.18.0",
-    "@types/bun": "^1.4.0",
+    "@busy-app/busy-lib": "^0.21.1",
+    "@types/bun": "^1.4.2",
     "typescript": "^7.0.2"
   }
 }

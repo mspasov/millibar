@@ -83,6 +83,10 @@ export const COLORS = {
  * with zero alpha, not dropping it from the list. */
 export const HIDDEN = (color: string) => `${color.slice(0, 7)}00`;
 
+/** The firmware's defaults for omitted colour fields (device OpenAPI schema). */
+const DEFAULT_COLOR = '#FFFFFFFF';
+const DEFAULT_FILL_COLORS = ['#FFFFFFFF', '#00000000'];
+
 export function severityColor(pct: number): string {
   if (pct >= 80) return COLORS.critical;
   if (pct >= 50) return COLORS.warn;
@@ -199,15 +203,18 @@ export function progressBar(opts: {
  */
 function tombstone(el: DrawElement): DrawElement {
   const expiring = { ...el, timeout: 1, display_until: undefined };
+  // busy-lib >= 0.21 types the colour fields as optional. An omitted colour is
+  // not invisible — the firmware fills in its schema default (opaque white) —
+  // so a tombstone must still send an explicit zero-alpha value.
   switch (expiring.type) {
     case 'text':
     case 'countdown':
-      return { ...expiring, color: HIDDEN(expiring.color) };
+      return { ...expiring, color: HIDDEN(expiring.color ?? DEFAULT_COLOR) };
     case 'rectangle':
       return {
         ...expiring,
-        fill_colors: expiring.fill_colors.map(HIDDEN),
-        border_color: HIDDEN(expiring.border_color),
+        fill_colors: (expiring.fill_colors ?? DEFAULT_FILL_COLORS).map(HIDDEN),
+        border_color: HIDDEN(expiring.border_color ?? DEFAULT_COLOR),
       };
     case 'image':
     case 'animation':
