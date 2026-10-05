@@ -5,16 +5,16 @@
     "": {
       "name": "busy",
       "devDependencies": {
-        "@busy-app/busy-lib": "^0.18.0",
-        "@types/bun": "^1.4.0",
+        "@busy-app/busy-lib": "^0.21.1",
+        "@types/bun": "^1.4.2",
         "typescript": "^7.0.2",
       },
     },
   },
   "packages": {
-    "@busy-app/busy-lib": ["@busy-app/busy-lib@0.18.0", "", { "dependencies": { "openapi-fetch": "^0.14.0", "protobufjs": "^8.0.1" } }, "sha512-3bYaISlM7QrssZcbia0u3tpAeYo5Xe6n16I42o5BxKj4O/xMaXadLgqHcgdrm2MpNXHwOQcVisYjPDedtc2efQ=="],
+    "@busy-app/busy-lib": ["@busy-app/busy-lib@0.21.1", "", { "dependencies": { "openapi-fetch": "^0.14.0", "protobufjs": "^8.0.1" } }, "sha512-GPPy9pE2Q/RNWMR56xq/ccFBetnz5KELNP/4JIMUC0V7eP4v8PlLW1kjuUqI7q0gOnmagENhKALsA3jhAHBsyA=="],
 
-    "@types/bun": ["@types/bun@1.4.0", "", { "dependencies": { "bun-types": "1.4.0" } }, "sha512-K+lZULY23vRgK/CfTjFIV+tyifaNdSMlPh9j+6mQ/cLfpOznLyAuzgV/JQysyECpkBQLVMSyvjlr2fBUSA9wFQ=="],
+    "@types/bun": ["@types/bun@1.4.2", "", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
 
     "@types/node": ["@types/node@26.1.2", "", { "dependencies": { "undici-types": "~8.3.0" } }, "sha512-Vu4a5UFA9rIIFJ7rB/Vaafh9lrCQszopTCx6KjFboXTGQbPNasehVR5TEiithSDGyd1DEiUByggTZsg8jukeIg=="],
 
@@ -58,7 +58,7 @@
 
     "@typescript/typescript-win32-x64": ["@typescript/typescript-win32-x64@7.0.2", "", { "os": "win32", "cpu": "x64" }, "sha512-0BQ3HkAHHlKLSp1qRvf3SUhGpGsDuhB/jgFw75guyqbxJqEaS0Cw/VFO8i2nHglJUzQCRtMMR/IBAKE3ETMC4g=="],
 
-    "bun-types": ["bun-types@1.4.0", "", { "dependencies": { "@types/node": "*" } }, "sha512-iIKw23BspnQQYd3prITOBxeUsxBHnwzX6YJfGMuNOZzeNcMmVqzIIVGRm1l69ogaPQmb4wB6BN8mA5bE9YuC5Q=="],
+    "bun-types": ["bun-types@1.4.2", "", { "dependencies": { "@types/node": "*" } }, "sha512-bxV1FgK7yBIzjRe5zBozIM4Bem11ZJcCXSrjWRG3YWLt8yFDePu4cLjpebO8OvPeIE9trbyPF4fuj3Cia4Fj3w=="],
 
     "long": ["long@5.3.2", "", {}, "sha512-mNAgZ1GmyNhD7AuqnTG3/VQ26o760+ZYBPKjPvugO8+nLbYfX6TVpJPseBvopbdY+qpZ/lKUnmEc1LeZYS3QAA=="],
 

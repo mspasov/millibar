@@ -180,6 +180,22 @@ describe('DisplaySession', () => {
     expect(tomb.border_color).toBe('#33DD6600');
   });
 
+  test('tombstones of elements that omitted their colours still send zero alpha', async () => {
+    // An omitted colour field means the firmware default (opaque white), not
+    // invisible — so the tombstone must fill in an explicit hidden value.
+    const sent: DisplayDrawParams[] = [];
+    const session = makeSession(sent);
+    await session.draw([
+      { id: 't', type: 'text', text: 'x', font: 'small', x: 0, y: 0 },
+      { id: 'r', type: 'rectangle', x: 0, y: 0, width: 4, height: 4, fill: 'solid' },
+    ]);
+    await session.draw([]);
+    const [t, r] = sent[1]!.elements as { color?: string; fill_colors?: string[]; border_color?: string }[];
+    expect(t!.color).toBe('#FFFFFF00');
+    expect(r!.fill_colors).toEqual(['#FFFFFF00', '#00000000']);
+    expect(r!.border_color).toBe('#FFFFFF00');
+  });
+
   test('animation tombstones go opacity 0 — the timeout alone leaves them up for a second', async () => {
     const sent: DisplayDrawParams[] = [];
     const session = makeSession(sent);
